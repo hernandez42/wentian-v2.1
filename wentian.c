@@ -441,8 +441,21 @@ int wentian_collect_all(void) {
         fail++;
     }
 
-    printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (22数据源, 1+1>2)\n", ok, fail);
-    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 = 25 维度\n\n");
+    /* ═══ 21. 多源融合预测 (原Python multi_source_predict.py) ══ */
+    printf("\n━━━ 21. 多源融合预测 (8通道投票) ━━━\n");
+    if (wt_predict_run() == 0) {
+        ok++;
+    } else {
+        fail++;
+    }
+
+    /* ═══ 22. 自进化自愈自完善 (api_evolve.c) ═══════════ */
+    printf("\n━━━ 22. 自进化自愈自完善引擎 ━━━\n");
+    /* 失败不算, 因为数据不足是常态 */
+    wt_evo_run();
+
+    printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (24模块)\n", ok, fail);
+    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 = 27 维度\n\n");
     return 0;
 }
 

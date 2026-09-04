@@ -137,7 +137,7 @@ def save_alert_state(state):
 # ── Mac风格消息构建 ────────────────────────────────────────
 def build_alert(nc, correl=None) -> dict:
     score = nc.get('score', 0)
-    level = nc.get('primary_type') or nc.get('level', 'CALM')
+    level = nc.get('primary_type') or nc.get('warning_level') or nc.get('level', 'CALM')
     icon = ICONS.get(level, '⚠')
     level_cn = LEVEL_CN.get(level, level)
     ts = nc.get('ts', 0)
@@ -213,6 +213,18 @@ def build_alert(nc, correl=None) -> dict:
         lines.append('天气型评分')
         lines.append('  ' + '  '.join(type_scores))
 
+    # 警报等级 + 降水强度 (v2.1 新增)
+    wl = nc.get('warning_level', '')
+    pi = nc.get('precip_intensity', '')
+    fcn = nc.get('false_cold_note', '')
+    if wl and wl != '无':
+        lines.append('')
+        lines.append(f'警报等级 {wl}')
+    if pi and pi not in ('无降水', '无数据'):
+        lines.append(f'降水强度 {pi}')
+    if fcn:
+        lines.append(f'注释 {fcn}')
+
     # 软件雷达(v1.6)
     if correl and correl.get('coherence', 0) > 0.1:
         lines.append('')
@@ -259,7 +271,7 @@ def main():
     if args.test:
         test_nc = {
             'ts': int(time.time()),
-            'level': 'SQUALL',
+            'warning_level': 'SQUALL',
             'forecast': '飑线过境',
             'score': 65,
             'pwv_slope_15min': -2.5,
@@ -277,6 +289,9 @@ def main():
             'false_cold_score': 0,
             'stationary_score': 0,
             'wind_shear_score': 0,
+            'warning_level': '预警',
+            'precip_intensity': '暴雨',
+            'false_cold_note': '',
             'squall_press_rise': 2.5,
             'squall_wd_chg': 75,
             'squall_pwv_drop': 2.0,
@@ -306,7 +321,7 @@ def main():
         return 0
 
     score = nc.get('score', 0)
-    level = nc.get('primary_type') or nc.get('level', 'CALM')
+    level = nc.get('primary_type') or nc.get('warning_level') or nc.get('level', 'CALM')
 
     correl = None
     if args.radar or level != 'CALM':

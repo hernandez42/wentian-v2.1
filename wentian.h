@@ -464,6 +464,12 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts);
 int wt_gnss_ion_run(void);           /* daemon入口 */
 int wt_gnss_ion_db_init(const char *path);
 
+/* ── 多源融合预测 (api_predict.c, 原Python multi_source_predict.py v3.0) ── */
+int wt_predict_run(void);           /* daemon入口: 1h/3h/6h 气压/温度/天气/风暴 */
+
+/* ── 自进化自愈自完善引擎 (api_evolve.c) ────────────────── */
+int wt_evo_run(void);                /* 评分闭环+自愈检查+阈值微调 */
+
 /* ── 数据库 ──────────────────────────────────────────────── */
 int wt_db_init(const char *path);
 int wt_db_save_outdoor(const wt_outdoor_t *out);
