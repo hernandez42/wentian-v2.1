@@ -474,6 +474,12 @@ int wt_predict_run(void);           /* daemon入口: 1h/3h/6h 气压/温度/天�
 /* ── 自进化自愈自完善引擎 (api_evolve.c) ────────────────── */
 int wt_evo_run(void);                /* 评分闭环+自愈检查+阈值微调 */
 
+/* ── 多源融合 S4 引擎 (api_multisrc.c, 主人2026-09-04指示) ── */
+int wt_multisrc_run(void);            /* 5源加权 S4 融合 (SDR+UART+OpenMeteo+UNO+ScintPi) */
+
+/* ── 开源专业数据集成 (api_open_data.c) ───────────────────── */
+int wt_open_data_run(void);            /* NOAA SWPC + met.no + wttr.in + USGS */
+
 /* ── 数据库 ──────────────────────────────────────────────── */
 int wt_db_init(const char *path);
 int wt_db_save_outdoor(const wt_outdoor_t *out);

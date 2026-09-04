@@ -454,8 +454,18 @@ int wentian_collect_all(void) {
     /* 失败不算, 因为数据不足是常态 */
     wt_evo_run();
 
+    /* ═══ 23. 多源融合 S4 (api_multisrc.c) ═══════════════ */
+    printf("\n━━━ 23. 多源融合 S4 引擎 (5源加权) ━━━\n");
+    /* 失败不算, 因为某些数据源可能离线 */
+    wt_multisrc_run();
+
+    /* ═══ 24. 开源专业数据集成 (api_open_data.c) ═══════ */
+    printf("\n━━━ 24. 开源专业数据集成 (4 API) ━━━\n");
+    /* 失败不算, 因为某些 API 可能暂时离线 */
+    wt_open_data_run();
+
     printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (24模块)\n", ok, fail);
-    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 = 27 维度\n\n");
+    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API = 32 维度\n\n");
     return 0;
 }
 
