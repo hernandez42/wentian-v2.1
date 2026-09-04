@@ -457,7 +457,11 @@ typedef struct {
     double  klob_slant_delay;/* Klobuchar斜向延迟(s) */
     double  klob_slant_factor;/* 斜向因子 */
     double  klob_period;    /* 周期(s) */
-    const char *activity;   /* 活动级别: QUIET/WEAK/MODERATE/STRONG */
+    const char *activity;   /* 活动级别: NONE/WEAK/MODERATE/STRONG/SEVERE */
+    int     valid_gps_samples;/* SNR≥35dB-Hz的有效GPS样本数 */
+    int     valid_bds_samples;/* SNR≥35dB-Hz的有效BDS样本数 */
+    int     total_samples;    /* 总样本数 */
+    char    algorithm_used[16];/* v2.0-Standard / v2.1-LowSNR */
 } wt_gnss_ion_t;
 
 int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts);
