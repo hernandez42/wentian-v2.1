@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+score.db
+wentian_test
+wentian
