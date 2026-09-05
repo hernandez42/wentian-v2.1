@@ -53,7 +53,12 @@ int wt_openmeteo_current(wt_outdoor_t *out) {
         "&current=temperature_2m,relative_humidity_2m,surface_pressure,pressure_msl,"
         "weather_code,wind_speed_10m,wind_direction_10m,precipitation,"
         "cloud_cover,uv_index,visibility"
-        "&timezone=Asia/Shanghai",
+        "&daily=temperature_2m_max,temperature_2m_min,weather_code,"
+        "precipitation_sum,precipitation_probability_max,"
+        "wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
+        "&timezone=Asia%%2FShanghai"
+        "&models=google_weather_next"
+        "&forecast_days=15",
         WENTIAN_LAT, WENTIAN_LON);
 
     char *json = wt_http_get(url, 10);
