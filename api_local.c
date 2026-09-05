@@ -105,7 +105,8 @@ int wt_local_gnss(wt_gnss_t *out) {
     int rc = sqlite3_prepare_v2(db,
         "SELECT lat,lon,alt,fix,sats,hdop,gps_sats,bds_sats,glonass_sats,"
         "pdop,vdop,alt_msl,speed_kts,heading_deg,gps_snr_avg,bds_snr_avg,ts "
-        "FROM gps_log ORDER BY ts DESC LIMIT 1",
+        "FROM gps_log WHERE fix > 0 AND lat IS NOT NULL AND lat != 0 "
+        "ORDER BY ts DESC LIMIT 1",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
     if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); sqlite3_close(db); return -1; }

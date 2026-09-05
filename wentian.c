@@ -105,12 +105,15 @@ static int nmea_read_gnss(wt_gnss_t *out) {
     if (n <= 0) return -1;
     buf[n] = '\0';
 
-    /* 解析最新 RMC/GGA/GSV/GLL - 简化为 lat/lon/alt/sats */
+    /* 解析最新 GGA - 扫描整个缓冲找最后一条GGA(不能用最后一行,那是GSV/GPTXT) */
     out->ts = time(NULL);
-    out->fix = 1;
+    out->fix = 0;   /* v2.4修复: 绝不在解析前伪造fix=1 */
     char *line = strtok(buf, "\r\n");
     char *latest = NULL;
-    while (line) { latest = line; line = strtok(NULL, "\r\n"); }
+    while (line) {
+        if (strstr(line, "GGA") && !strstr(line, "Gnss")) latest = line;
+        line = strtok(NULL, "\r\n");
+    }
     if (!latest) return -1;
 
     if (strstr(latest, "$GNGGA") || strstr(latest, "$GPGGA")) {
@@ -119,7 +122,7 @@ static int nmea_read_gnss(wt_gnss_t *out) {
         int fix_q = 0, sats = 0;
         double hdop = 0, alt = 0;
         if (sscanf(latest, "%*[^,],%*[^,],%15[^,],%3[^,],%15[^,],%3[^,],%d,%d,%lf,%lf",
-            lat_s, lat_ns, lon_s, lon_ew, &fix_q, &sats, &hdop, &alt) >= 8) {
+            lat_s, lat_ns, lon_s, lon_ew, &fix_q, &sats, &hdop, &alt) >= 8 && fix_q > 0) {
             double lat = atof(lat_s);
             double lon = atof(lon_s);
             /* ddmm.mmmm → dd.dddd */
