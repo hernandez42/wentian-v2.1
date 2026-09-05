@@ -431,13 +431,59 @@ static int export_one(sqlite3 *db, FILE *out) {
         write_kv_int(out, "storm_score", sqlite3_column_int(st, 3), 1);
     }
     sqlite3_finalize(st);
-    fprintf(out, "    }\n");
+    fprintf(out, "    },\n");
+
+    /* 23. 钦天监增强 (imperial_enhancement 表) */
+    fprintf(out, "    \"imperial_enhancement\": {\n");
+    if (sqlite3_prepare_v2(db, "SELECT ts,solar_term,wuxing_quadrant,hexagram,precip_adjust_factor,press_adjust_factor,alert_threshold,system_stable FROM imperial_enhancement ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
+        && sqlite3_step(st) == SQLITE_ROW) {
+        write_kv_int(out, "ts", sqlite3_column_int64(st, 0), 0);
+        write_kv_esc(out, "solar_term", (const char*)sqlite3_column_text(st, 1), 0);
+        write_kv_esc(out, "wuxing_quadrant", (const char*)sqlite3_column_text(st, 2), 0);
+        write_kv_esc(out, "hexagram", (const char*)sqlite3_column_text(st, 3), 0);
+        write_kv_num(out, "precip_adjust", sqlite3_column_double(st, 4), 0);
+        write_kv_num(out, "press_adjust", sqlite3_column_double(st, 5), 0);
+        write_kv_num(out, "alert_threshold", sqlite3_column_double(st, 6), 0);
+        write_kv_int(out, "system_stable", sqlite3_column_int(st, 7), 1);
+    }
+    sqlite3_finalize(st);
+    fprintf(out, "    },\n");
+
+    /* 24. ROTI (读取 JSON 文件) */
+    fprintf(out, "    \"roti\": {\n");
+    FILE *rf = fopen("/root/data/fusion/roti.json", "r");
+    if (rf) {
+        char rbuf[1024];
+        size_t rn = fread(rbuf, 1, sizeof(rbuf)-1, rf);
+        fclose(rf);
+        if (rn > 0) {
+            rbuf[rn] = '\0';
+            /* 提取 roti 和 status 字段 */
+            const char *r_r = strstr(rbuf, "\"roti\":");
+            const char *r_s = strstr(rbuf, "\"status\":");
+            if (r_r) {
+                double roti_val = 0;
+                sscanf(r_r + 8, "%lf", &roti_val);
+                write_kv_num(out, "roti", roti_val, 0);
+            }
+            if (r_s) {
+                char status[32] = {0};
+                sscanf(r_s + 9, "\"%31[^\"]\"", status);
+                write_kv_esc(out, "status", status, 0);
+            }
+            write_kv_int(out, "samples", 0, 1);  /* last=true */
+        }
+    } else {
+        write_kv_num(out, "roti", 0, 0);
+        write_kv_esc(out, "status", "数据不足", 1);
+    }
+    fprintf(out, "    },\n");
 
     fprintf(out, "  },\n");
     fprintf(out, "  \"meta\": {\n");
-    fprintf(out, "    \"data_source_count\": \"17 API + 4 主人硬件 + 1 Kalman = 22 维度\",\n");
+    fprintf(out, "    \"data_source_count\": \"17 API + 4 硬件 + 1 Kalman + 1 PWV + 1 电离层 + 1 相干 + 1 预测 + 1 自进化 + 1 多源S4 + 4 开源 + 1 自愈 + 1 TEC + 1 钦天监 + 1 ROTI = 36 维度\",\n");
     fprintf(out, "    \"db_path\": \"/root/data/wentian.db\",\n");
-    fprintf(out, "    \"schema\": \"18 tables: outdoor/metar/air/marine/flood/apod/donki/sun/iss/quake/local_uno/local_gnss/local_iono/local_sdr + swpc_kp/swpc_f107/swpc_scale + kf_pressure\"\n");
+    fprintf(out, "    \"schema\": \"18 tables + imperial_enhancement + roti.json\"\n");
     fprintf(out, "  }\n");
     fprintf(out, "}\n");
     return 0;
