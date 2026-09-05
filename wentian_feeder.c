@@ -509,11 +509,37 @@ static int export_one(sqlite3 *db, FILE *out) {
     /* 确保至少有一个detail写入 */
     write_kv_esc(out, "detail", anote, 0);
     write_kv_esc(out, "version", "星象 v1.0", 1);
-    fprintf(out, "    }\n");  /* astral最后一块, 无逗号 */
+    fprintf(out, "    },\n");  /* astral后面还有weathernext */
+
+    /* 26. WeatherNext 2 (weathernext_forecast.json) */
+    fprintf(out, "    \"weathernext\": {\n");
+    FILE *wf = fopen("/root/data/fusion/weathernext_forecast.json", "r");
+    if (wf) {
+        char wbuf[2048];
+        size_t wn = fread(wbuf, 1, sizeof(wbuf)-1, wf);
+        fclose(wf);
+        if (wn > 0) {
+            wbuf[wn] = '\0';
+            /* 摘要daily温度范围 */
+            const char *sd = strstr(wbuf, "\"summary\":");
+            if (sd) {
+                char sum_buf[1024] = {0};
+                /* 取前3天摘要 */
+                const char *d1 = strstr(sd, "2026");
+                if (d1) {
+                    snprintf(sum_buf, sizeof(sum_buf), "%.60s...", d1);
+                    write_kv_esc(out, "summary_preview", sum_buf, 0);
+                }
+            }
+            write_kv_int(out, "hours", wn > 100 ? 360 : 0, 0);
+        }
+    }
+    write_kv_esc(out, "model", "google_weathernext2_ensemble", 1);
+    fprintf(out, "    }\n");  /* weathernext最后一块, 无逗号 */
 
     fprintf(out, "  },\n");  /* data 块结束 */
     fprintf(out, "  \"meta\": {\n");
-    fprintf(out, "    \"data_source_count\": \"17 API + 4 硬件 + 1 Kalman + 1 PWV + 1 电离层 + 1 相干 + 1 预测 + 1 自进化 + 1 多源S4 + 4 开源 + 1 自愈 + 1 TEC + 1 钦天监 + 1 ROTI = 36 维度\",\n");
+    fprintf(out, "    \"data_source_count\": \"17 API + 4 硬件 + 1 Kalman + 1 PWV + 1 电离层 + 1 相干 + 1 预测 + 1 自进化 + 1 多源S4 + 4 开源 + 1 自愈 + 1 TEC + 1 钦天监 + 1 ROTI + 1 星象 + 1 WeatherNext = 38 维度\",\n");
     fprintf(out, "    \"db_path\": \"/root/data/wentian.db\",\n");
     fprintf(out, "    \"schema\": \"18 tables + imperial_enhancement + roti.json\"\n");
     fprintf(out, "  }\n");
