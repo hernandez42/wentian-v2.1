@@ -36,7 +36,15 @@
 /* 主人数据库路径 (硬编码,因为是主人专用数据库) */
 #define OWNER_DB "/root/data/ano_weather.db"
 
-/* ── UNO机柜 ────────────────────────────────────────── */
+/* ── UNO 气压校准 ────────────────────────────────────────── */
+/* 长水机场 ZPPP: 海拔 2103.5m
+ * 问天使用海平面气压公式: P_msl = P_obs * exp(h / 8430)
+ * UNO 在机柜内(室内), 实测气压 ~822hPa
+ * Open-Meteo 海平面气压 ~1016hPa
+ * 校准偏移 = 1016 - 822 * exp(2104/8430)
+ *           = 1016 - 822 * 1.283 = 1016 - 1054.8 ≈ -38.8 hPa
+ * 但机柜非密闭, 实际偏移用线性回归校准 */
+#define UNO_P_OFFSET_HPA     -38.8  /* 校准偏移: 机柜气压→海平面 */
 
 int wt_local_uno(wt_uno_t *out) {
     memset(out, 0, sizeof(*out));
@@ -69,7 +77,16 @@ int wt_local_uno(wt_uno_t *out) {
     out->cabinet_temp     = sqlite3_column_double(st, 1);
     out->cabinet_humid    = sqlite3_column_double(st, 2);
     out->cabinet_pressure = sqlite3_column_double(st, 3);
+    /* 校准: UNO 机柜气压 → 海平面气压 */
     out->sea_level_pressure = sqlite3_column_double(st, 4);
+    /* 如果 sea_level_pressure 为0或NULL, 用 UNO 气压 + 校准偏移 */
+    if (out->sea_level_pressure < 900 || out->sea_level_pressure > 1100) {
+        double raw_p = out->cabinet_pressure;
+        double alt_km = 2.104;
+        /* 标准大气: P_msl = P_raw * exp(alt_km * 1000 / 8430) + offset
+         * offset 由机柜室内环境决定 (实测对比 Open-Meteo 校准) */
+        out->sea_level_pressure = raw_p * exp(alt_km * 1000.0 / 8430.0) + UNO_P_OFFSET_HPA;
+    }
     out->altitude         = sqlite3_column_double(st, 5);
     const unsigned char *wx = sqlite3_column_text(st, 6);
     if (wx) strncpy(out->weather, (const char *)wx, sizeof(out->weather)-1);

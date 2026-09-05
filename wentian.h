@@ -486,6 +486,9 @@ int wt_full_self_repair(void);          /* APEX ΔG<0 自动修复所有数据�
 /* ── METAR 多源备选 (wt_metar_fallback.c) ────────────────── */
 int wt_metar_fallback_run(wt_metar_t *out);  /* Open-Meteo/NWS/OGIMET 自动降级 */
 
+/* ── 等效 TEC 引擎 (api_tec.c) ────────────────────────────── */
+int wt_tec_run(void);                       /* 多源 TEC 融合 (Kp/F10.7/S4→TECU) */
+
 /* ── 数据库 ──────────────────────────────────────────────── */
 int wt_db_init(const char *path);
 int wt_db_save_outdoor(const wt_outdoor_t *out);

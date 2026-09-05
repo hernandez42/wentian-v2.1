@@ -485,8 +485,12 @@ int wentian_collect_all(void) {
      * 修复: 重启 systemd 服务 / 触发SDR扫频 / 启动脚本 */
     wt_full_self_repair();
 
+    /* ═══ 26. 等效 TEC 多源融合 (api_tec.c) ═══════════ */
+    printf("\n━━━ 26. 等效 TEC 多源融合 ━━━\n");
+    wt_tec_run();
+
     printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (24模块)\n", ok, fail);
-    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API + 1自愈 = 33 维度\n\n");
+    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API + 1自愈 + 1TEC = 34 维度\n\n");
     return 0;
 }
 
