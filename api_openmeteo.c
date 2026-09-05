@@ -50,7 +50,7 @@ int wt_openmeteo_current(wt_outdoor_t *out) {
     snprintf(url, sizeof(url),
         "https://api.open-meteo.com/v1/forecast?"
         "latitude=%.4f&longitude=%.4f"
-        "&current=temperature_2m,relative_humidity_2m,surface_pressure,"
+        "&current=temperature_2m,relative_humidity_2m,surface_pressure,pressure_msl,"
         "weather_code,wind_speed_10m,wind_direction_10m,precipitation,"
         "cloud_cover,uv_index,visibility"
         "&timezone=Asia/Shanghai",
@@ -65,7 +65,12 @@ int wt_openmeteo_current(wt_outdoor_t *out) {
 
     out->temperature  = wt_json_num(cur, "temperature_2m", NAN);
     out->humidity     = wt_json_num(cur, "relative_humidity_2m", NAN);
-    out->pressure_msl = wt_json_num(cur, "surface_pressure", NAN);
+    /* ⚠ 修复(2026-09-05): 字段错位——旧代码把站点压surface_pressure(海拔2100m
+     * 处≈803hPa)当海平面气压压进pressure_msl, 导致Kalman三源融合(UNO 1050/
+     * OM 803/METAR 1010)混尺度, 自进化气压MAE高达200hPa。MSL必须用pressure_msl(≈1010) */
+    out->pressure_msl = wt_json_num(cur, "pressure_msl", NAN);
+    if (out->pressure_msl < 850 || out->pressure_msl > 1100)
+        out->pressure_msl = wt_json_num(cur, "surface_pressure", NAN);  /* 兜底 */
     out->weather_code = wt_json_int(cur, "weather_code", 0);
     out->wind_speed   = wt_json_num(cur, "wind_speed_10m", 0);
     out->wind_dir     = wt_json_num(cur, "wind_direction_10m", 0);

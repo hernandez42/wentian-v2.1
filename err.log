@@ -1,0 +1,180 @@
+wt_self_repair.c: In function ‘do_self_repair’:
+wt_self_repair.c:126:21: warning: too many arguments for format [-Wformat-extra-args]
+  126 |                     "SELECT COUNT(*), strftime('%%s','now') - MAX(ts) FROM "
+      |                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+wt_self_repair.c: In function ‘repair_sdr_gnss_scan’:
+wt_self_repair.c:68:5: warning: ignoring return value of ‘fread’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+   68 |     fread(buf, 1, 255, fp);
+      |     ^~~~~~~~~~~~~~~~~~~~~~
+wt_metar_fallback.c: In function ‘fetch_nws_tgftp’:
+wt_metar_fallback.c:219:50: warning: unused variable ‘ss’ [-Wunused-variable]
+  219 |         int y = 0, m = 0, d = 0, hh = 0, mm = 0, ss = 0;
+      |                                                  ^~
+wt_metar_fallback.c: At top level:
+wt_metar_fallback.c:123:12: warning: ‘fetch_ogimet_metar’ defined but not used [-Wunused-function]
+  123 | static int fetch_ogimet_metar(wt_metar_fallback_t *out) {
+      |            ^~~~~~~~~~~~~~~~~~
+wt_metar_fallback.c: In function ‘wt_metar_fallback_run’:
+wt_metar_fallback.c:267:5: warning: ‘__builtin_strncpy’ output may be truncated copying 7 bytes from a string of length 7 [-Wstringop-truncation]
+  267 |     strncpy(out->icao, best.icao, sizeof(out->icao)-1);
+      |     ^
+wt_metar_fallback.c:275:5: warning: ‘__builtin_strncpy’ output may be truncated copying 511 bytes from a string of length 511 [-Wstringop-truncation]
+  275 |     strncpy(out->raw, best.raw, sizeof(out->raw)-1);
+      |     ^
+api_evolve.c: In function ‘wt_evaluate_predictor.constprop’:
+api_evolve.c:253:56: warning: ‘%d’ directive output may be truncated writing between 1 and 11 bytes into a region of size between 0 and 19 [-Wformat-truncation=]
+  253 |              "温度MAE=%.2f°C(分=%d) 气压MAE=%.2fhPa(分=%d) 天气CSI(分=%d) n_pred=%d n_wx=%d",
+      |                                                        ^~
+api_evolve.c:253:14: note: directive argument in the range [-2147483547, 2147483647]
+  253 |              "温度MAE=%.2f°C(分=%d) 气压MAE=%.2fhPa(分=%d) 天气CSI(分=%d) n_pred=%d n_wx=%d",
+      |              ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+api_evolve.c:253:14: note: directive argument in the range [-2147483648, 100]
+api_evolve.c:253:14: note: directive argument in the range [3, 200]
+In file included from /usr/include/stdio.h:980,
+                 from wentian.h:39,
+                 from api_evolve.c:23:
+In function ‘snprintf’,
+    inlined from ‘wt_evaluate_predictor.constprop’ at api_evolve.c:252:5:
+/usr/include/aarch64-linux-gnu/bits/stdio2.h:54:10: note: ‘__builtin___snprintf_chk’ output between 81 and 743 bytes into a destination of size 64
+   54 |   return __builtin___snprintf_chk (__s, __n, __USE_FORTIFY_LEVEL - 1,
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |                                    __glibc_objsize (__s), __fmt,
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |                                    __va_arg_pack ());
+      |                                    ~~~~~~~~~~~~~~~~~
+api_gnss_ion.c:195:20: warning: ‘ion_activity_from_s4’ defined but not used [-Wunused-function]
+  195 | static const char *ion_activity_from_s4(double s4_max) {
+      |                    ^~~~~~~~~~~~~~~~~~~~
+api_gnss_ion.c:86:15: warning: ‘calc_s4_standard’ defined but not used [-Wunused-function]
+   86 | static double calc_s4_standard(const double *snr_db, int n) {
+      |               ^~~~~~~~~~~~~~~~
+api_gnss_ion.c:54:15: warning: ‘calc_s4_v1’ defined but not used [-Wunused-function]
+   54 | static double calc_s4_v1(const double *snr_db, int n) {
+      |               ^~~~~~~~~~
+api_local.c:18:49: warning: "/*" within comment [-Wcomment]
+   18 |  *   CSV:    /root/data/sdr/v4_sweep_20260902_v2/*.csv
+      |                                                  
+api_multisrc.c: In function ‘multisrc_sdr_s4’:
+api_multisrc.c:67:9: warning: unused variable ‘found’ [-Wunused-variable]
+   67 |     int found = 0;
+      |         ^~~~~
+api_multisrc.c:66:17: warning: unused variable ‘st’ [-Wunused-variable]
+   66 |     struct stat st;
+      |                 ^~
+In function ‘score_thunderstorm’,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:665:26:
+api_nowcast.c:237:27: warning: ‘⛈雷暴(间接检测 斜�.’ directive output truncated writing 29 bytes into a region of size 8 [-Wformat-truncation=]
+  237 |             SAFE_SNPRINTF("⛈雷暴(间接检测 斜率%.1fmm)", nc->pwv_slope);
+      |                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+api_nowcast.c:98:66: note: in definition of macro ‘SAFE_SNPRINTF’
+   98 |         int n = snprintf(alert + (*pos), sizeof(alert) - (*pos), fmt, __VA_ARGS__); \
+      |                                                                  ^~~
+api_nowcast.c: In function ‘wt_nowcast_compute’:
+api_nowcast.c:237:32: note: format string is defined here
+  237 |             SAFE_SNPRINTF("⛈雷暴(间接检测 斜率%.1fmm)", nc->pwv_slope);
+      |                            ~~~~~^~~~~~~~~~~~~~
+In file included from /usr/include/stdio.h:980,
+                 from wentian.h:39,
+                 from api_nowcast.c:35:
+In function ‘snprintf’,
+    inlined from ‘score_thunderstorm’ at api_nowcast.c:237:13,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:665:26:
+/usr/include/aarch64-linux-gnu/bits/stdio2.h:54:10: note: ‘__builtin___snprintf_chk’ output between 36 and 345 bytes into a destination of size 8
+   54 |   return __builtin___snprintf_chk (__s, __n, __USE_FORTIFY_LEVEL - 1,
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |                                    __glibc_objsize (__s), __fmt,
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |                                    __va_arg_pack ());
+      |                                    ~~~~~~~~~~~~~~~~~
+In function ‘score_thunderstorm’,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:665:26:
+api_nowcast.c:235:27: warning: ‘⛈雷暴(METAR TS确认! �...’ directive output truncated writing 32 bytes into a region of size 8 [-Wformat-truncation=]
+  235 |             SAFE_SNPRINTF("⛈雷暴(METAR TS确认! 斜率%.1fmm)", nc->pwv_slope);
+      |                           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+api_nowcast.c:98:66: note: in definition of macro ‘SAFE_SNPRINTF’
+   98 |         int n = snprintf(alert + (*pos), sizeof(alert) - (*pos), fmt, __VA_ARGS__); \
+      |                                                                  ^~~
+api_nowcast.c: In function ‘wt_nowcast_compute’:
+api_nowcast.c:235:32: note: format string is defined here
+  235 |             SAFE_SNPRINTF("⛈雷暴(METAR TS确认! 斜率%.1fmm)", nc->pwv_slope);
+      |                            ~~~~~^~~~~~~~~~~~~~~~~~~
+In function ‘snprintf’,
+    inlined from ‘score_thunderstorm’ at api_nowcast.c:235:13,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:665:26:
+/usr/include/aarch64-linux-gnu/bits/stdio2.h:54:10: note: ‘__builtin___snprintf_chk’ output between 39 and 348 bytes into a destination of size 8
+   54 |   return __builtin___snprintf_chk (__s, __n, __USE_FORTIFY_LEVEL - 1,
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |                                    __glibc_objsize (__s), __fmt,
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |                                    __va_arg_pack ());
+      |                                    ~~~~~~~~~~~~~~~~~
+In function ‘score_squall_line’,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:669:25:
+api_nowcast.c:309:23: warning: ‘🌪飑线(气压↑’ directive output truncated writing 20 bytes into a region of size 8 [-Wformat-truncation=]
+  309 |         SAFE_SNPRINTF("🌪飑线(气压↑%.1fhPa 风向变%.0f° PWV↓%.1fmm)",
+      |                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+api_nowcast.c:98:66: note: in definition of macro ‘SAFE_SNPRINTF’
+   98 |         int n = snprintf(alert + (*pos), sizeof(alert) - (*pos), fmt, __VA_ARGS__); \
+      |                                                                  ^~~
+api_nowcast.c: In function ‘wt_nowcast_compute’:
+api_nowcast.c:309:28: note: format string is defined here
+  309 |         SAFE_SNPRINTF("🌪飑线(气压↑%.1fhPa 风向变%.0f° PWV↓%.1fmm)",
+      |                        ~~~~^~~~~~~
+In function ‘snprintf’,
+    inlined from ‘score_squall_line’ at api_nowcast.c:309:9,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:669:25:
+/usr/include/aarch64-linux-gnu/bits/stdio2.h:54:10: note: ‘__builtin___snprintf_chk’ output between 53 and 980 bytes into a destination of size 8
+   54 |   return __builtin___snprintf_chk (__s, __n, __USE_FORTIFY_LEVEL - 1,
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |                                    __glibc_objsize (__s), __fmt,
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |                                    __va_arg_pack ());
+      |                                    ~~~~~~~~~~~~~~~~~
+In function ‘score_false_cold’,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:677:29:
+api_nowcast.c:376:23: warning: ‘❄假冷锋(降温’ directive output truncated writing 19 bytes into a region of size 8 [-Wformat-truncation=]
+  376 |         SAFE_SNPRINTF("❄假冷锋(降温%.1f°C %s降水 V型气压%.1fhPa)",
+      |                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+api_nowcast.c:98:66: note: in definition of macro ‘SAFE_SNPRINTF’
+   98 |         int n = snprintf(alert + (*pos), sizeof(alert) - (*pos), fmt, __VA_ARGS__); \
+      |                                                                  ^~~
+api_nowcast.c: In function ‘wt_nowcast_compute’:
+api_nowcast.c:376:28: note: format string is defined here
+  376 |         SAFE_SNPRINTF("❄假冷锋(降温%.1f°C %s降水 V型气压%.1fhPa)",
+      |                        ~~~~~^~~~~~~
+In function ‘snprintf’,
+    inlined from ‘score_false_cold’ at api_nowcast.c:376:9,
+    inlined from ‘wt_nowcast_compute’ at api_nowcast.c:677:29:
+/usr/include/aarch64-linux-gnu/bits/stdio2.h:54:10: note: ‘__builtin___snprintf_chk’ output between 54 and 672 bytes into a destination of size 8
+   54 |   return __builtin___snprintf_chk (__s, __n, __USE_FORTIFY_LEVEL - 1,
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |                                    __glibc_objsize (__s), __fmt,
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |                                    __va_arg_pack ());
+      |                                    ~~~~~~~~~~~~~~~~~
+api_open_data.c: In function ‘wt_open_data_run’:
+api_open_data.c:115:9: warning: ‘__builtin_strncpy’ output may be truncated copying 63 bytes from a string of length 63 [-Wstringop-truncation]
+  115 |         strncpy(out_time, latest_time, max_time - 1);
+      |         ^
+api_predict.c: In function ‘wt_predict_compute’:
+api_predict.c:420:40: warning: unused variable ‘votes’ [-Wunused-variable]
+  420 |     /* votes unused */ (void)0; vote_t votes[3] = {
+      |                                        ^~~~~
+api_predict.c: In function ‘wt_predict_run’:
+api_predict.c:160:69: warning: ‘:’ directive output may be truncated writing 1 byte into a region of size between 0 and 16 [-Wformat-truncation=]
+  160 |     snprintf(since_iso, sizeof(since_iso), "%04d-%02d-%02dT%02d:%02d:%02d",
+      |                                                                     ^
+In file included from /usr/include/stdio.h:980,
+                 from wentian.h:39,
+                 from api_predict.c:22:
+In function ‘snprintf’,
+    inlined from ‘load_uno_pressure’ at api_predict.c:160:5,
+    inlined from ‘wt_predict_compute’ at api_predict.c:360:15,
+    inlined from ‘wt_predict_run’ at api_predict.c:580:14:
+/usr/include/aarch64-linux-gnu/bits/stdio2.h:54:10: note: ‘__builtin___snprintf_chk’ output between 20 and 72 bytes into a destination of size 32
+   54 |   return __builtin___snprintf_chk (__s, __n, __USE_FORTIFY_LEVEL - 1,
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   55 |                                    __glibc_objsize (__s), __fmt,
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   56 |                                    __va_arg_pack ());
+      |                                    ~~~~~~~~~~~~~~~~~
