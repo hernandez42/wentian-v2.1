@@ -81,8 +81,8 @@ static void repair_sdr_gnss_scan(void) {
         mkdir(dirname, 0755);
 
         snprintf(cmd, sizeof(cmd),
-            "rtl_power -f 1560M:1590M:50k -g 40 -i 30 "
-            "-o %s/gnss_l1_%02d%02d%02d.csv 2>&1 &",
+            "rtl_power -f 1569M:1581M:50k -g 40 -i 5 -1 "
+            "%s/gnss_l1_%02d%02d%02d.csv 2>&1 &",
             dirname, tm->tm_hour, tm->tm_min, tm->tm_sec);
         int ret = system(cmd);
         (void)ret;

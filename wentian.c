@@ -184,24 +184,40 @@ int wentian_collect_all(void) {
 
     printf("\n━━━ 5. AviationWeather 机场实测 (ZPPP长水) ━━━\n");
     wt_metar_t metar = {0};
-    if (wt_aviation_metar("ZPPP", &metar) == 0) {
-        printf("  ✅ T=%.0f°C 风%d°/%dkt 气压=%.0fhPa\n",
+    /* 多源METAR: 先试美国官方API, 不行则用 Open-Meteo/ECMWF */
+    if (wt_aviation_metar("ZPPP", &metar) == 0 && metar.obs_time > time(NULL) - 10800) {
+        /* 美国官方API有数据且新鲜(<3h), 用官方 */
+        printf("  ✅ T=%.0f°C 风%d°/%dkt 气压=%.0fhPa (源:aviationweather.gov)\n",
             metar.temp, metar.wind_dir, metar.wind_speed_kt, metar.altim_hpa);
         printf("     RAW: %s\n", metar.raw);
         wt_db_save_metar(&metar);
         ok++;
-        /* 备用机场 */
-        printf("\n━━━ 5b. 备用机场 METAR (ZUUK/ZPLJ/ZPPP) ━━━\n");
-        const char *alt_icaos[] = {"ZUUK", "ZPLJ", "ZUTF"};
-        for (int i = 0; i < 3; i++) {
-            wt_metar_t alt = {0};
-            if (wt_aviation_metar(alt_icaos[i], &alt) == 0) {
-                printf("  ✅ %s T=%.0f°C 风%d°/%dkt 气压=%.0fhPa\n",
-                    alt.icao, alt.temp, alt.wind_dir, alt.wind_speed_kt, alt.altim_hpa);
-                wt_db_save_metar(&alt);
-            }
+    } else if (wt_metar_fallback_run(&metar) == 0) {
+        /* Open-Meteo ECMWF 降级 */
+        printf("  ✅ T=%.0f°C 风%d°/%dkt 气压=%.0fhPa (源:ECMWF/Open-Meteo)\n",
+            metar.temp, metar.wind_dir, metar.wind_speed_kt, metar.altim_hpa);
+        printf("     RAW: %s\n", metar.raw);
+        wt_db_save_metar(&metar);
+        ok++;
+    } else {
+        printf("  ⚠️ 所有METAR源均失败\n");
+        fail++;
+    }
+
+    /* ═══ 6. 备用机场 METAR ─────────────────────────────── */
+    printf("\n━━━ 6. 备用机场 METAR (ZUUK/ZPLJ/ZUTF) ━━━\n");
+    const char *alt_icaos[] = {"ZUUK", "ZPLJ", "ZUTF"};
+    for (int i = 0; i < 3; i++) {
+        wt_metar_t alt = {0};
+        if (wt_aviation_metar(alt_icaos[i], &alt) == 0) {
+            printf("  ✅ %s T=%.0f°C 风%d°/%dkt 气压=%.0fhPa\n",
+                alt.icao, alt.temp, alt.wind_dir, alt.wind_speed_kt, alt.altim_hpa);
+            wt_db_save_metar(&alt);
+        } else if (wt_metar_fallback_run(&alt) == 0 && alt.obs_time > 0) {
+            printf("  ✅ %s T=%.0f°C (源:ECMWF降级)\n", alt.icao, alt.temp);
+            wt_db_save_metar(&alt);
         }
-    } else fail++;
+    }
 
     printf("\n━━━ 6. NASA APOD 每日天文图 ━━━\n");
     wt_apod_t apod = {0};
