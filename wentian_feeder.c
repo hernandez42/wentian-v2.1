@@ -477,10 +477,41 @@ static int export_one(sqlite3 *db, FILE *out) {
         write_kv_num(out, "roti", 0, 0);
         write_kv_esc(out, "status", "数据不足", 1);
     }
-    /* roti最后一块, 无逗号 */
-    fprintf(out, "    }\n");
+    /* roti不是最后一块 */
+    fprintf(out, "    },\n");
 
-    fprintf(out, "  },\n");  /* data 块结束, 需逗号分隔 meta */
+    /* 25. 星象 (astral.json) */
+    fprintf(out, "    \"astral\": {\n");
+    FILE *af = fopen("/root/data/fusion/astral.json", "r");
+    char anote[256] = {0};
+    strcpy(anote, "日月星曜各安其位");
+    if (af) {
+        char abuf[4096];
+        size_t an = fread(abuf, 1, sizeof(abuf)-1, af);
+        fclose(af);
+        if (an > 0) {
+            abuf[an] = '\0';
+            const char *cs = strstr(abuf, "\"celestial_assessment\":");
+            if (cs) {
+                char ca[64] = {0};
+                sscanf(cs, "\"celestial_assessment\": \"%63[^\"]\"", ca);
+                write_kv_esc(out, "celestial_assessment", ca, 0);
+            }
+            const char *as = strstr(abuf, "\"anomalies\":");
+            if (as) {
+                const char *dt = strstr(as, "\"detail\":\"");
+                if (dt) {
+                    sscanf(dt, "\"detail\": \"%255[^\"]\"", anote);
+                }
+            }
+        }
+    }
+    /* 确保至少有一个detail写入 */
+    write_kv_esc(out, "detail", anote, 0);
+    write_kv_esc(out, "version", "星象 v1.0", 1);
+    fprintf(out, "    }\n");  /* astral最后一块, 无逗号 */
+
+    fprintf(out, "  },\n");  /* data 块结束 */
     fprintf(out, "  \"meta\": {\n");
     fprintf(out, "    \"data_source_count\": \"17 API + 4 硬件 + 1 Kalman + 1 PWV + 1 电离层 + 1 相干 + 1 预测 + 1 自进化 + 1 多源S4 + 4 开源 + 1 自愈 + 1 TEC + 1 钦天监 + 1 ROTI = 36 维度\",\n");
     fprintf(out, "    \"db_path\": \"/root/data/wentian.db\",\n");
