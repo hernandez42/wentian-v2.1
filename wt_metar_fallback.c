@@ -68,8 +68,12 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
         const char *q = strstr(p+16, "\"temperature_2m\"");
         if (q) { q += 16; while(*q && (*q!=':'&&*q!=' '&&*q!='\n')) q++; if(*q==':')q++; while(*q==' ')q++; if(*q!='"') temp = strtod(q, NULL); }
     }
-    p = strstr(body, "\"relative_humidity_2m\""); if (p && strstr(p+24, "\"relative_humidity_2m\"")) p = strstr(p+24, "\"relative_humidity_2m\"");
-    if (p) { p += 24; while(*p && *p!=':' ) p++; if(*p==':')p++; while(*p==' ')p++; if(*p!='"') humid = strtod(p, NULL); }
+    /* ⚠ 修复(2026-09-05): "\"relative_humidity_2m\"" 含引号共22字符。
+     * 旧代码 p+=24 跳过头两个数字直接落到下一个冒号(=pressure_msl的值),
+     * 导致 humid=1010 → 露点 Td=23.6-(100-1010)/5=205.6°C 脏数据入库 */
+    p = strstr(body, "\"relative_humidity_2m\""); if (p && strstr(p+22, "\"relative_humidity_2m\"")) p = strstr(p+22, "\"relative_humidity_2m\"");
+    if (p) { p += 22; while(*p && *p!=':' ) p++; if(*p==':')p++; while(*p==' ')p++; if(*p!='"') humid = strtod(p, NULL); }
+    if (humid > 100) humid = -1;  /* 合法性防线: RH物理范围0~100 */
     p = strstr(body, "\"pressure_msl\""); if (p && strstr(p+13, "\"pressure_msl\"")) p = strstr(p+13, "\"pressure_msl\"");
     if (p) { p += 13; while(*p && *p!=':' ) p++; if(*p==':')p++; while(*p==' ')p++; if(*p!='"') press = strtod(p, NULL); }
     p = strstr(body, "\"weather_code\""); if (p) weather_code = atoi(strstr(p, ",\"") ? p+11+5 : p+11);
