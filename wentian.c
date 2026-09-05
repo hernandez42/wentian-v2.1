@@ -489,10 +489,12 @@ int wentian_collect_all(void) {
     printf("\n━━━ 26. 等效 TEC 多源融合 ━━━\n");
     wt_tec_run();
 
-    /* ═══ 27. 钦天监 (imperial_observatory.py) ═══════════ */
-    printf("\n━━━ 27. 钦天监 · 天文历法推演 ━━━\n");
+    /* ═══ 27. 钦天监 + ROTI (imperial_observatory.py + roti_calc.py) ═══ */
+    printf("\n━━━ 27. 钦天监 · 天文历法 + ROTI ━━━\n");
     {
         int rc = system("python3 /root/scripts/wentian/imperial_observatory.py 2>/dev/null");
+        (void)rc;
+        rc = system("python3 /root/scripts/wentian/roti_calc.py 2>/dev/null");
         (void)rc;
     }
 
@@ -500,7 +502,7 @@ int wentian_collect_all(void) {
     ok++;  /* 钦天监算一个维度 */
 
     printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (28模块)\n", ok, fail);
-    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API + 1自愈 + 1TEC + 1钦天监 = 35 维度\n\n");
+    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API + 1自愈 + 1TEC + 1钦天监+ROTI = 36 维度\n\n");
     return 0;
 }
 

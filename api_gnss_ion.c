@@ -52,6 +52,7 @@ static const double KLOB_BETA[4]  = {91136.0, 65536.0, -393216.0, 393216.0};
  *   S4 = stddev(SNR) / mean(SNR)
  *   缺点: SNR 是对数刻度, 算出的 S4 与 ScintPi/ISMR 标准值有系统偏差 */
 static double calc_s4_v1(const double *snr_db, int n) {
+/* UNUSED_FUNC */
     if (n < 5) return -1.0;
     double mean = 0.0;
     for (int i = 0; i < n; i++) mean += snr_db[i];
@@ -83,6 +84,7 @@ static double calc_s4_v1(const double *snr_db, int n) {
  * 输出: S4 值, 失败返回 -1
  */
 static double calc_s4_standard(const double *snr_db, int n) {
+/* UNUSED_FUNC */
     if (n < 60) return -1.0;  /* 至少1分钟1Hz样本 */
 
     /* 步骤1: SNR(dB) → C/N0(线性) → I = C/N0², 剔除低质量样本 */
@@ -191,6 +193,7 @@ static double calc_s4_robust_low_snr(const double *snr_db, int n,
 
 /* ── v1.0 兼容等级 (旧算法阈值, 保留) ─────────────────── */
 static const char *ion_activity_from_s4(double s4_max) {
+/* UNUSED_FUNC */
     if (s4_max < 0.05) return "QUIET";
     if (s4_max < 0.15) return "WEAK";
     if (s4_max < 0.30) return "MODERATE";
@@ -203,7 +206,7 @@ static const char *ion_activity_from_s4(double s4_max) {
 static int load_gnss_snr(double *gps_snrs, int gps_max,
                          double *bds_snrs, int bds_max,
                          double *pdops, int pdop_max,
-                         int lookback_min) {
+                         /* unused */ int lookback_min) {
     sqlite3 *db;
     /* 从原始gps_log表读SNR, 该表由api_local.c持续写入
      * gps_log的ts是ISO格式(如2026-09-04T09:22:08), 用strftime统一比较 */
@@ -318,7 +321,7 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts) {
      * 当 GPS SNR 达到 ≥35 dB-Hz (主人换天线后), 自动用 v2.0 标准算法
      * 现阶段主人硬件信号弱, 强制使用 v2.1 */
     double avg_gps_snr_calc = 0, avg_bds_snr_calc = 0;
-    int valid_gps_cnt = 0, valid_bds_cnt = 0;
+    double valid_gps_cnt = 0, valid_bds_cnt = 0;
     out->s4_gps = calc_s4_robust_low_snr(gps_snrs, ng,
                                           &avg_gps_snr_calc, &valid_gps_cnt);
     out->s4_bds = calc_s4_robust_low_snr(bds_snrs, ng,

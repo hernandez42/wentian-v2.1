@@ -242,8 +242,8 @@ static int score_thunderstorm(const wt_nowcast_t *nc, char *alert, int *pos,
 /* ── 飑线评分 ─────────────────────────────────────────── */
 /* 特征: 气压骤升 + 风向突变 + PWV骤降(飑线过境) */
 static int score_squall_line(int metar_n, const time_t *ts_arr, const double *p_arr,
-                              const double *wd_arr, const double *ws_arr,
-                              const char *raw_arr, int raw_len,
+                              const double *wd_arr, const double *ws_arr, /* unused */
+                              /* unused */ const char *raw_arr, int raw_len,
                               const double *pwv_times, const double *pwv_arr, int pwv_n,
                               double *squall_press, double *squall_wd, double *squall_pwv,
                               char *alert, int *pos) {
@@ -314,7 +314,7 @@ static int score_squall_line(int metar_n, const time_t *ts_arr, const double *p_
 
 /* ── 假冷锋评分 ───────────────────────────────────────── */
 /* 特征: 温度骤降 + 无降水 + 气压V型(先降后升) */
-static int score_false_cold(int metar_n, const time_t *ts_arr, const double *t_arr,
+static int score_false_cold(int metar_n, /* unused */ const time_t *ts_arr, const double *t_arr,
                              const double *p_arr, const char *raw_arr, int raw_len,
                              double *fc_temp_drop, double *fc_press_v,
                              char *alert, int *pos) {
@@ -356,6 +356,7 @@ static int score_false_cold(int metar_n, const time_t *ts_arr, const double *t_a
 
     /* 3. 气压V型: 先降后升(冷锋过境特征) */
     double min_p = p_arr[0], max_p_start = p_arr[0];
+    (void)max_p_start;
     int min_idx = 0;
     for (int i = 1; i < metar_n; i++) {
         if (p_arr[i] < min_p) { min_p = p_arr[i]; min_idx = i; }
@@ -541,7 +542,7 @@ static void wt_metar_precip_level(const char *raw, char *out_level, int max_len,
 
     /* 降水强度前缀: - 弱, + 强, 双++ 极强 */
     int strong = strstr(raw, "+") != NULL;
-    int weak  = strstr(raw, "-") != NULL;
+    /* weak unused */ (void)strstr(raw, "-");
 
     if (has_ts && (has_gr || has_rain)) {
         snprintf(out_level, max_len, "暴雨");

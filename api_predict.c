@@ -181,7 +181,7 @@ static int load_uno_pressure(int hours, double *p_series, int max_n) {
 }
 
 /* ── 加载 Open-Meteo 当前室外 + 预测 ──────────────────────── */
-static int load_outdoor(double *T, double *H, double *P, double *dew,
+static int load_outdoor(double *T, double *H, /* P unused */ double *P, double *dew,
                          double *cloud_3h, double *rain_prob_3h) {
     sqlite3 *db;
     if (sqlite3_open(ANO_DB, &db) != SQLITE_OK) return -1;
@@ -294,7 +294,7 @@ static int load_ionosphere(double *s4_max, char *warn_out, int max_w) {
         *s4_max = s4_g > s4_b ? s4_g : s4_b;
         if (*s4_max >= 0.4) snprintf(warn_out, max_w, "强闪烁");
         else if (*s4_max >= 0.2) snprintf(warn_out, max_w, "中等闪烁");
-        else snprintf(warn_out, max_w, "");
+        else if (max_w > 0) warn_out[0] = '\0';
         found = 1;
     }
     sqlite3_finalize(st);
@@ -417,7 +417,7 @@ static int wt_predict_compute(wt_predict_t *out) {
     /* 7. 投票融合天气 */
     /* 每个源的票数 = 置信度 */
     typedef struct { const char *wx; double vote; } vote_t;
-    vote_t votes[3] = {
+    /* votes unused */ (void)0; vote_t votes[3] = {
         { out->zambretti_wx, zambretti_conf },
         { out->openmeteo_3h[0] ? out->openmeteo_3h : NULL, 0.8 },
         { out->metar_now[0] ? out->metar_now : NULL, 0.6 },

@@ -57,7 +57,7 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
     /* 解析 current.temperature_2m 等字段 */
     double temp = -999, humid = -1, press = -1;
     int weather_code = -1, wind_dir = -1;
-    double wind_spd = -1, cloud = -1;
+    double wind_spd = -1; /* cloud unused */
 
     /* 简单JSON解析: 找 last "temperature_2m":数字 (跳过 units 里的字符串字段) */
     const char *p;

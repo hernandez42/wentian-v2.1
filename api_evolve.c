@@ -167,11 +167,11 @@ static int wt_evaluate_predictor(const char *predictor, int hours,
     }
 
     /* 2. 与实测对比 */
-    double sum_abs_temp = 0, sum_abs_press = 0, sum_abs_humid = 0;
-    int n_temp = 0, n_press = 0, n_humid = 0;
+    double sum_abs_temp = 0, sum_abs_press = 0; /* sum_abs_humid unused */
+    int n_temp = 0, n_press = 0; /* n_humid unused */
     int hit = 0, false_alarm = 0, miss = 0, correct_neg = 0;
     int n_wx = 0;
-    int score_total = 0;
+    /* score_total unused */ int score_total = 0; (void)score_total;
 
     for (int i = 0; i < n_pred; i++) {
         time_t target = ts_arr[i] + 3600;  /* 预报未来1h */
@@ -234,9 +234,9 @@ static int wt_evaluate_predictor(const char *predictor, int hours,
     int s_wx = 0;
     if (n_wx > 0) {
         int pod_n = hit + miss;
-        double pod = (pod_n > 0) ? (double)hit / pod_n : 0;
+        double pod = (pod_n > 0) ? (double)hit / pod_n : 0; (void)pod;
         int far_n = hit + false_alarm;
-        double far = (far_n > 0) ? (double)false_alarm / far_n : 0;
+        double far = (far_n > 0) ? (double)false_alarm / far_n : 0; (void)far;
         double csi_n = (double)hit / (hit + miss + false_alarm);
         double csi = (csi_n > 0) ? csi_n : 0;
         /* CSI ≥0.5 = 100, 0=0 */
@@ -312,13 +312,13 @@ static const wt_health_t HEALTH_CHECKS[] = {
 #define HEALTH_N (sizeof(HEALTH_CHECKS)/sizeof(HEALTH_CHECKS[0]))
 
 static int wt_self_heal_check(char *alerts_out, int max_len,
-                               int *out_restarted_count) {
+                               /* unused */ int *out_restarted_count) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
 
     int n_unhealthy = 0;
     int pos = 0;
-    int restarted = 0;
+    int restarted = 0; (void)restarted;
 
     for (size_t i = 0; i < HEALTH_N; i++) {
         sqlite3_stmt *st;

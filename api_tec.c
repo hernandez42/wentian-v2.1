@@ -74,7 +74,7 @@ int wt_tec_run(void) {
     /* 3. 加权融合 */
     double vals[] = {tec_kp, tec_f107, tec_s4};
     double wts[]  = {0.50,   0.20,     0.30};
-    const char *names[] = {"Kp", "F10.7", "S4"};
+    /* names unused */ (void)0;
     int n = 3;
 
     double w_sum = 0, fused = 0;

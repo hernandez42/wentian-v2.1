@@ -273,7 +273,7 @@ int wt_multisrc_run(void) {
     /* ── 加权融合 (缺失源动态调整权重) ──────────────────── */
     double weights[5] = {W_SDR, W_GNSS_UART, W_OPENMETEO, W_UNO, W_SCINTPI};
     double values[5] = {s4_sdr, s4_uart, s4_openmeteo, s4_uno, s4_scintpi};
-    const char *names[5] = {"SDR", "UART", "OpenMeteo", "UNO", "ScintPi"};
+    /* names unused */ (void)0;
 
     /* 归一化权重 (跳过NO DATA) */
     double w_sum = 0;

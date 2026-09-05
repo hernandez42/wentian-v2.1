@@ -66,6 +66,7 @@ static void repair_sdr_gnss_scan(void) {
     if (!fp) return;
     char buf[256] = {0};
     fread(buf, 1, 255, fp);
+    (void)buf;
     pclose(fp);
 
     if (strstr(buf, "RTL2838") || strstr(buf, "R828D")) {

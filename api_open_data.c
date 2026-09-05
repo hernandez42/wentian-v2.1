@@ -56,10 +56,13 @@ static double json_find_double(const char *json, const char *key) {
     return v;
 }
 
+/* json_find_int — 未使用, 保留为注释 */
+/*
 static int json_find_int(const char *json, const char *key) {
     double v = json_find_double(json, key);
     return isnan(v) ? -1 : (int)v;
 }
+*/
 
 /* ── 1. NOAA SWPC Kp (1分钟) ──────────────────────────────── */
 /* 格式: [{"time_tag":"2026-09-04T05:09:00","kp_index":1,"estimated_kp":0.67,"kp":"1M"}, ...] */
