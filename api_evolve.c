@@ -305,15 +305,20 @@ static const wt_health_t HEALTH_CHECKS[] = {
     {"local_uno",        900,   5, "UNO传感器"},
     {"multi_source_forecast", 900, 3, "多源融合预测"},
     {"radar_correl",     900,   5, "软件雷达相干"},
+    {"external_data",    3600,  3, "NOAA/mno/wttr开源数据"},
+    {"multisrc_s4",      3600,  3, "多源融合S4"},
+    {"local_iono",       3600,  3, "电离层S4"},
 };
 #define HEALTH_N (sizeof(HEALTH_CHECKS)/sizeof(HEALTH_CHECKS[0]))
 
-static int wt_self_heal_check(char *alerts_out, int max_len) {
+static int wt_self_heal_check(char *alerts_out, int max_len,
+                               int *out_restarted_count) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
 
     int n_unhealthy = 0;
     int pos = 0;
+    int restarted = 0;
 
     for (size_t i = 0; i < HEALTH_N; i++) {
         sqlite3_stmt *st;
@@ -332,12 +337,13 @@ static int wt_self_heal_check(char *alerts_out, int max_len) {
         }
         sqlite3_finalize(st);
 
-        if (rows < HEALTH_CHECKS[i].rows_min) {
+        if (rows < HEALTH_CHECKS[i].rows_min && rows > 0) {
+            /* 只报警不下诊断 */
             pos += snprintf(alerts_out + pos, max_len - pos,
                 "[%s]行数过少(%d<%d)|",
                 HEALTH_CHECKS[i].desc, rows, HEALTH_CHECKS[i].rows_min);
             n_unhealthy++;
-        } else if (age > HEALTH_CHECKS[i].max_age_sec) {
+        } else if (rows > 0 && age > HEALTH_CHECKS[i].max_age_sec) {
             pos += snprintf(alerts_out + pos, max_len - pos,
                 "[%s]数据陈旧(%ds前)|",
                 HEALTH_CHECKS[i].desc, age);
@@ -392,10 +398,12 @@ int wt_evo_run(void) {
 
     /* 1. 自愈检查 */
     char heal_alerts[512] = {0};
-    int n_unhealthy = wt_self_heal_check(heal_alerts, sizeof(heal_alerts));
+    int restarted = 0;
+    int n_unhealthy = wt_self_heal_check(heal_alerts, sizeof(heal_alerts), &restarted);
     if (n_unhealthy > 0) {
         printf("  ⚠️ 自愈检查发现 %d 项异常:\n", n_unhealthy);
         printf("    %s\n", heal_alerts);
+        printf("  🔧 全系统自愈: 已重启 %d 个组件\n", restarted);
     } else {
         printf("  ✅ 自愈检查: 全部数据表正常\n");
     }

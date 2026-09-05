@@ -464,8 +464,13 @@ int wentian_collect_all(void) {
     /* 失败不算, 因为某些 API 可能暂时离线 */
     wt_open_data_run();
 
+    /* ═══ 25. 全系统自愈修复 (wt_self_repair.c) ═══════ */
+    /* APEX: 当系统检测到数据异常(ΔG<0)时自动修复
+     * 修复: 重启 systemd 服务 / 触发SDR扫频 / 启动脚本 */
+    wt_full_self_repair();
+
     printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (24模块)\n", ok, fail);
-    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API = 32 维度\n\n");
+    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API + 1自愈 = 33 维度\n\n");
     return 0;
 }
 
