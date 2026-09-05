@@ -88,9 +88,9 @@ static int wt_local_uno_robust(wt_uno_t *out) {
 /* ── NMEA 串口直接读取 ATGM336H ───────────────────────── */
 static int nmea_read_gnss(wt_gnss_t *out) {
     memset(out, 0, sizeof(*out));
-    /* 找USB串口 - 优先 by-id */
-    const char *dev = "/dev/ttyUSB2";
-    if (access(dev, R_OK) != 0) dev = "/dev/ttyUSB0";
+    /* 找USB串口 - 必须用by-id路径(CH340=ATGM336H北斗), ttyUSB编号会漂 */
+    const char *dev = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0";
+    if (access(dev, R_OK) != 0) dev = "/dev/ttyUSB1";
     int fd = open(dev, O_RDONLY | O_NONBLOCK);
     if (fd < 0) return -1;
     struct termios tio;

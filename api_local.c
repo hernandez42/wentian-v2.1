@@ -330,7 +330,9 @@ int wt_local_save_gnss(const wt_gnss_t *g) {
     sqlite3 *db; sqlite3_stmt *st;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
     if (sqlite3_prepare_v2(db,
-        "INSERT INTO local_gnss VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", -1, &st, NULL) == SQLITE_OK) {
+        "INSERT INTO local_gnss (ts,lat,lon,alt,fix,total_sats,gps_sats,bds_sats,"
+        "glonass_sats,pdop,hdop,vdop,altitude_msl,speed_kts,heading_deg,gps_snr,bds_snr) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", -1, &st, NULL) == SQLITE_OK) {
         sqlite3_bind_int64(st, 1, g->ts);
         sqlite3_bind_double(st, 2, g->lat);
         sqlite3_bind_double(st, 3, g->lon);
@@ -346,7 +348,12 @@ int wt_local_save_gnss(const wt_gnss_t *g) {
         sqlite3_bind_double(st, 13, g->altitude_msl);
         sqlite3_bind_int(st, 14, g->speed_kts);
         sqlite3_bind_int(st, 15, g->heading_deg);
-        sqlite3_step(st);
+        sqlite3_bind_double(st, 16, g->gps_snr);
+        sqlite3_bind_double(st, 17, g->bds_snr);
+        if (sqlite3_step(st) != SQLITE_DONE)
+            fprintf(stderr, "[WARN] local_gnss入库失败: %s\n", sqlite3_errmsg(db));
+    } else {
+        fprintf(stderr, "[WARN] local_gnss prepare失败: %s\n", sqlite3_errmsg(db));
     }
     sqlite3_finalize(st); sqlite3_close(db);
     return 0;
