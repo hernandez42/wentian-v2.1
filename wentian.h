@@ -74,7 +74,9 @@ time_t parse_iso(const char *s);
 char *wt_json_dup(const char *json, const char *key);                  /* "key":"val" */
 char *wt_json_dup_arr(const char *json, const char *key, int idx);     /* "key":[...] */
 double wt_json_num(const char *json, const char *key, double defval);
+double wt_json_num_nan(const char *json, const char *key);
 int    wt_json_int(const char *json, const char *key, int defval);
+int    wt_json_int_neg1(const char *json, const char *key);
 
 /* ── HTTP GET (返回body字符串, 需要free) ─────────────────── */
 char *wt_http_get(const char *url, int timeout_sec);

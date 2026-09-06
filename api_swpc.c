@@ -76,8 +76,10 @@ int wt_swpc_kp(wt_kp_t *out) {
         out->ts = mktime(&tm);
         free(t);
     }
-    out->kp = wt_json_num(snippet, "estimated_kp", 0);
-    out->kp_index = wt_json_int(snippet, "kp_index", 0);
+/* ⚠ 修复(2026-09-06): 旧代码default=0 — 字段缺失时静默返回假零
+     * 改为 NAN/-1 表示缺失, 在feeder层跳过输出 */
+    out->kp = wt_json_num_nan(snippet, "estimated_kp");
+    out->kp_index = wt_json_int_neg1(snippet, "kp_index");
     char *kp_t = wt_json_dup(snippet, "kp");
     if (kp_t) { strncpy(out->kp_text, kp_t, sizeof(out->kp_text)-1); free(kp_t); }
     /* station_count/a_running 字段不存在, 留0 */
@@ -122,9 +124,9 @@ int wt_swpc_f107(wt_f107_t *out) {
         out->ts = mktime(&tm);
         free(t);
     }
-    out->flux_sfu = wt_json_num(snip, "flux", 0);
+    out->flux_sfu = wt_json_num_nan(snip, "flux");
     out->frequency_mhz = 2800;
-    out->ninety_day_mean = wt_json_num(snip, "ninety_day_mean", 0);
+    out->ninety_day_mean = wt_json_num_nan(snip, "ninety_day_mean");
     free(snip);
     free(json);
     return 0;
@@ -167,7 +169,7 @@ int wt_swpc_scales(wt_swpc_scale_t *out) {
             int gd = 1; const char *ge = gp + 1;
             while (*ge && gd > 0) { if (*ge == '{') gd++; else if (*ge == '}') gd--; ge++; }
             char *gsnip = malloc(ge - gp); memcpy(gsnip, gp, ge-gp); gsnip[ge-gp]='\0';
-            out->g_scale = wt_json_int(gsnip, "Scale", 0);
+            out->g_scale = wt_json_int_neg1(gsnip, "Scale");
             char *g_t = wt_json_dup(gsnip, "Text");
             if (g_t) { strncpy(out->g_text, g_t, sizeof(out->g_text)-1); free(g_t); }
             free(gsnip);
@@ -181,8 +183,8 @@ int wt_swpc_scales(wt_swpc_scale_t *out) {
             int sd = 1; const char *se = sp + 1;
             while (*se && sd > 0) { if (*se == '{') sd++; else if (*se == '}') sd--; se++; }
             char *ssnip = malloc(se - sp); memcpy(ssnip, sp, se-sp); ssnip[se-sp]='\0';
-            out->s_scale = wt_json_int(ssnip, "Scale", 0);
-            out->s_prob = wt_json_int(ssnip, "Prob", 0);
+            out->s_scale = wt_json_int_neg1(ssnip, "Scale");
+            out->s_prob = wt_json_int_neg1(ssnip, "Prob");
             char *s_t = wt_json_dup(ssnip, "Text");
             if (s_t) { strncpy(out->s_text, s_t, sizeof(out->s_text)-1); free(s_t); }
             free(ssnip);
@@ -196,9 +198,9 @@ int wt_swpc_scales(wt_swpc_scale_t *out) {
             int rd = 1; const char *re_ = rp + 1;
             while (*re_ && rd > 0) { if (*re_ == '{') rd++; else if (*re_ == '}') rd--; re_++; }
             char *rsnip = malloc(re_ - rp); memcpy(rsnip, rp, re_-rp); rsnip[re_-rp]='\0';
-            out->r_scale = wt_json_int(rsnip, "Scale", 0);
-            out->r_minor_prob = wt_json_int(rsnip, "MinorProb", 0);
-            out->r_major_prob = wt_json_int(rsnip, "MajorProb", 0);
+            out->r_scale = wt_json_int_neg1(rsnip, "Scale");
+            out->r_minor_prob = wt_json_int_neg1(rsnip, "MinorProb");
+            out->r_major_prob = wt_json_int_neg1(rsnip, "MajorProb");
             char *r_t = wt_json_dup(rsnip, "Text");
             if (r_t) { strncpy(out->r_text, r_t, sizeof(out->r_text)-1); free(r_t); }
             free(rsnip);

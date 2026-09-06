@@ -492,8 +492,8 @@ int wentian_collect_all(void) {
     printf("\n━━━ 26. 等效 TEC 多源融合 ━━━\n");
     wt_tec_run();
 
-    /* ═══ 27. 钦天监 + 星象 + WeatherNext + ROTI ═══ */
-    printf("\n━━━ 27. 钦天监 · 星象 · WeatherNext · ROTI ━━━\n");
+    /* ═══ 27. 钦天监 + 星象 + WeatherNext + ROTI + 真实TEC ═══ */
+    printf("\n━━━ 27. 钦天监 · 星象 · WeatherNext · ROTI · TEC实时 ━━━\n");
     {
         int rc = system("python3 /root/scripts/wentian/imperial_observatory.py 2>/dev/null");
         (void)rc;
@@ -502,6 +502,9 @@ int wentian_collect_all(void) {
         rc = system("python3 /root/scripts/wentian/weathernext_fetch.py 2>/dev/null");
         (void)rc;
         rc = system("python3 /root/scripts/wentian/roti_calc.py 2>/dev/null");
+        (void)rc;
+        /* ⚠ 修复(2026-09-06): 真实TEC源替代硬编码Klobuchar — IGS WHU实时GIM */
+        rc = system("python3 /root/scripts/wentian/wt_fetch_tec.py 2>/dev/null");
         (void)rc;
     }
 

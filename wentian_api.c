@@ -228,6 +228,26 @@ static const char *find_num(const char *json, const char *key) {
     return p;
 }
 
+/* ── 带 NaN 默认值的 JSON 数值提取 (替代硬编码0默认值) ───── */
+double wt_json_num_nan(const char *json, const char *key) {
+    const char *p = find_num(json, key);
+    if (!p) return NAN;
+    char *endp;
+    double v = strtod(p, &endp);
+    return (endp == p) ? NAN : v;
+}
+
+/* ── 带 -1 默认值的 JSON 整数提取 (替代硬编码0默认值) ────── */
+int wt_json_int_neg1(const char *json, const char *key) {
+    const char *p = find_num(json, key);
+    if (!p) return -1;
+    char *endp;
+    long v = strtol(p, &endp, 10);
+    return (endp == p) ? -1 : (int)v;
+}
+
+/* 声明在 wentian_api.h */
+
 double wt_json_num(const char *json, const char *key, double defval) {
     const char *p = find_num(json, key);
     if (!p) return defval;

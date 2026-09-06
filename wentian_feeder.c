@@ -27,6 +27,7 @@ static void write_kv(FILE *f, const char *key, const char *val, int last) {
     fprintf(f, "    \"%s\": \"%s\"%s\n", key, val, last ? "" : ",");
 }
 static void write_kv_num(FILE *f, const char *key, double val, int last) {
+    if (isnan(val)) { /* NaN表示字段缺失, 跳过输出 */ return; }
     fprintf(f, "    \"%s\": %.4f%s\n", key, val, last ? "" : ",");
 }
 static void write_kv_int(FILE *f, const char *key, long val, int last) {
@@ -184,9 +185,14 @@ static int export_one(sqlite3 *db, FILE *out) {
     if (sqlite3_prepare_v2(db, "SELECT ts,g_scale,s_scale,r_scale FROM swpc_scale ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
         && sqlite3_step(st) == SQLITE_ROW) {
         write_kv_int(out, "ts", sqlite3_column_int64(st, 0), 0);
-        write_kv_int(out, "g_scale", sqlite3_column_int(st, 1), 0);
-        write_kv_int(out, "s_scale", sqlite3_column_int(st, 2), 0);
-        write_kv_int(out, "r_scale", sqlite3_column_int(st, 3), 1);
+        long _g = sqlite3_column_int(st, 1);
+        if (_g >= 0) { fprintf(out, "    \"g_scale\": %ld,\n", _g); }
+        long _s = sqlite3_column_int(st, 2);
+        if (_s >= 0) { fprintf(out, "    \"s_scale\": %ld,\n", _s); }
+        long _r = sqlite3_column_int(st, 3);
+        if (_r >= 0) { fprintf(out, "    \"r_scale\": %ld\n", _r); } else { fprintf(out, "    \"r_scale\": -1\n"); }
+        // last field needs special handling: if none output, close brace
+        if (_g < 0 && _s < 0) { fprintf(out, "    \"r_scale\": %ld\n", _r); }
     }
     sqlite3_finalize(st);
     fprintf(out, "    },\n");
@@ -535,7 +541,42 @@ static int export_one(sqlite3 *db, FILE *out) {
         }
     }
     write_kv_esc(out, "model", "google_weathernext2_ensemble", 1);
-    fprintf(out, "    }\n");  /* weathernext最后一块, 无逗号 */
+    fprintf(out, "    },\n");  /* weathernext, 后面还有tec_realtime */
+
+    /* 27b. 真实TEC (IGS WHU GIM, 替代硬编码Klobuchar) */
+    fprintf(out, "    \"tec_realtime\": ");
+    FILE *_trf = fopen("/root/data/fusion/tec_realtime.json", "r");
+    double _tec_val = -1; char _tec_src[32] = {0};
+    if (_trf) {
+        char _trbuf[4096];
+        size_t _trn = fread(_trbuf, 1, sizeof(_trbuf)-1, _trf);
+        fclose(_trf);
+        if (_trn > 0) {
+            _trbuf[_trn] = '\0';
+            char *_tp = strstr(_trbuf, "\"tec_kunming\"");
+            if (_tp) {
+                _tp = strchr(_tp, ':');
+                if (_tp) { _tec_val = strtod(_tp+1, NULL); }
+            }
+            _tp = strstr(_trbuf, "\"source\"");
+            if (_tp) {
+                _tp = strchr(_tp, ':');
+                if (_tp) {
+                    while (*_tp && *_tp != '"') _tp++;
+                    if (*_tp) {
+                        char *_te = ++_tp;
+                        while (*_te && *_te != '"') _te++;
+                        size_t _tl = _te - _tp;
+                        if (_tl < sizeof(_tec_src)-1) {
+                            memcpy(_tec_src, _tp, _tl); _tec_src[_tl] = '\0';
+                        }
+                    }
+                }
+            }
+        }
+    }
+    fprintf(out, "{\"tec_kunming\": %.1f, \"source\": \"%s\"}", _tec_val, _tec_src);
+    fprintf(out, ",\n");
 
     fprintf(out, "  },\n");  /* data 块结束 */
     fprintf(out, "  \"meta\": {\n");

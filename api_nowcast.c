@@ -853,7 +853,13 @@ static int wt_nowcast_save_json(const wt_nowcast_t *nc) {
 /* ── Nowcast主入口 ─────────────────────────────────────── */
 int wt_nowcast_run(void) {
     wt_nowcast_t nc = {0};
-    wt_nowcast_compute(&nc);
+    /* ⚠ 修复(2026-09-06): 返回值被忽略 → 失败时全0nc流至JSON/DB/推送
+     * 旧行为: `wt_nowcast_compute(&nc);` 不检查返回值,
+     * 失败时memset(0)的nc被当作真实数据写入nowcast.json和数据库 */
+    if (wt_nowcast_compute(&nc) != 0) {
+        printf("  ❌ nowcast计算失败, 跳过本轮输出\n");
+        return -1;
+    }
 
     printf("\n━━━ 17. 短临Nowcasting (全天气型) ━━━\n");
     printf("  ✅ 主风险: %s (评分: %d/100) - %s\n", nc.level, nc.score, nc.forecast);
