@@ -65,7 +65,10 @@ def run():
  dy=n.timetuple().tm_yday
  tm=['立春','雨水','惊蛰','春分','清明','谷雨','立夏','小满','芒种','夏至','小暑','大暑',
      '立秋','处暑','白露','秋分','寒露','霜降','立冬','小雪','大雪','冬至','小寒','大寒']
- ti=max(0,min(23,int((dy-5)*24/365.25)))
+ sl=(dy-80)*360/365.25
+ sl=sl%360
+ nml=(sl-315+360)%360
+ ti=max(0,min(23,int(nml/15)))
  out={'ts':ts,'time':n.strftime('%Y-%m-%d %H:%M:%S'),'location':'昆明长水机场(25.08°N,102.91°E)',
       'solar_term':{'current':tm[ti],'index':ti},'sun':s,'moon':m,'planets':p,
       'celestial_assessment':ov,'anomalies':a,

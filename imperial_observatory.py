@@ -62,10 +62,10 @@ SOLAR_TERMS = [
     '立冬', '小雪', '大雪', '冬至', '小寒', '大寒'
 ]
 
-def solar_term_from_doy(doy):
-    """年积日 → 节气"""
-    idx = int((doy - 5) * 24 / 365.25)
-    if idx < 0: idx = 0
+def solar_term_from_sun_lon(sun_lon):
+    """太阳黄经 → 节气。立春从315°起, 每15°一节气"""
+    normalized = (sun_lon - 315 + 360) % 360
+    idx = int(normalized / 15)
     if idx >= 24: idx = 23
     return SOLAR_TERMS[idx], idx
 
@@ -73,9 +73,8 @@ def solar_term_from_doy(doy):
 def solar_term_now():
     doy = datetime.now().timetuple().tm_yday
     sun_lon = (doy - 80) * 360.0 / 365.25
-    while sun_lon < 0: sun_lon += 360
-    while sun_lon >= 360: sun_lon -= 360
-    term_name, term_idx = solar_term_from_doy(doy)
+    sun_lon = sun_lon % 360
+    term_name, term_idx = solar_term_from_sun_lon(sun_lon)
     return term_name, term_idx, sun_lon
 
 
@@ -233,12 +232,12 @@ def imperial_enhancement_run():
 
     # 获取问天数据
     row_o = sql("SELECT temperature, humidity, pressure_msl, wind_speed FROM outdoor ORDER BY ts DESC LIMIT 1", WENTIAN_DB)
-    temp = row_o[0] if row_o else 20
-    humid = row_o[1] if row_o else 50
-    press = row_o[2] if row_o else 1013
-    wind = row_o[3] if row_o else 5
+    temp = float(row_o[0]) if row_o and row_o[0] is not None else 20
+    humid = float(row_o[1]) if row_o and row_o[1] is not None else 50
+    press = float(row_o[2]) if row_o and row_o[2] is not None else 1013
+    wind = float(row_o[3]) if row_o and row_o[3] is not None else 5
     row_k = sql("SELECT noaa_kp_est FROM external_data ORDER BY ts DESC LIMIT 1", WENTIAN_DB)
-    kp = row_k[0] if row_k else 0
+    kp = float(row_k[0]) if row_k and row_k[0] is not None else 0
 
     # 1. 节气增强
     term_name, term_idx, sun_lon = solar_term_now()
@@ -355,4 +354,9 @@ def imperial_enhancement_run():
 
 
 if __name__ == '__main__':
-    imperial_enhancement_run()
+    try:
+        imperial_enhancement_run()
+    except Exception as e:
+        print(f'❌ 钦天监崩溃: {e}')
+        import traceback
+        traceback.print_exc()
