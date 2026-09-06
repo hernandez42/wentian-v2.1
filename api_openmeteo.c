@@ -80,17 +80,19 @@ int wt_openmeteo_current(wt_outdoor_t *out) {
     out->pressure_msl = wt_json_num(cur, "pressure_msl", NAN);
     if (out->pressure_msl < 850 || out->pressure_msl > 1100)
         out->pressure_msl = wt_json_num(cur, "surface_pressure", NAN);  /* 兜底 */
-    out->weather_code = wt_json_int(cur, "weather_code", 0);
-    out->wind_speed   = wt_json_num(cur, "wind_speed_10m", 0);
-    out->wind_dir     = wt_json_num(cur, "wind_direction_10m", 0);
-    out->precipitation= wt_json_num(cur, "precipitation", 0);
-    out->cloud_cover  = wt_json_num(cur, "cloud_cover", 0);
-    out->uv_index     = wt_json_num(cur, "uv_index", 0);
-    out->visibility   = wt_json_num(cur, "visibility", 0);
-    out->fetched_at   = time(NULL);
-
-    const char *txt = wmo_text(out->weather_code);
-    strncpy(out->weather_text, txt, sizeof(out->weather_text) - 1);
+    out->weather_code = wt_json_int_neg1(cur, "weather_code");
+    if (out->weather_code >= 0) {
+        const char *txt = wmo_text(out->weather_code);
+        strncpy(out->weather_text, txt, sizeof(out->weather_text) - 1);
+    } else {
+        out->weather_text[0] = '\0';
+    }
+    out->wind_speed   = wt_json_num(cur, "wind_speed_10m", NAN);
+    out->wind_dir     = wt_json_num(cur, "wind_direction_10m", NAN);
+    out->precipitation= wt_json_num(cur, "precipitation", NAN);
+    out->cloud_cover  = wt_json_num(cur, "cloud_cover", NAN);
+    out->uv_index     = wt_json_num(cur, "uv_index", NAN);
+    out->visibility   = wt_json_num(cur, "visibility", NAN);
 
     free(json);
     return 0;

@@ -280,7 +280,7 @@ int wt_nasa_donki_list(wt_donki_type_t type, wt_donki_event_t *out, int max) {
 
         /* GST 的 kpIndex 当 classType */
         if (!e->classType[0] && type == WT_DONKI_GST) {
-            double kp = wt_json_num(blk, "kpIndex", 0);
+            double kp = wt_json_num(blk, "kpIndex", NAN);
             if (kp > 0) snprintf(e->classType, sizeof(e->classType), "Kp%.0f", kp);
         }
 
@@ -369,7 +369,7 @@ int wt_sun_times(double lat, double lon, time_t date, wt_sun_t *out) {
             if (t) { out->sunset = parse_iso(t); free(t); }
             t = wt_json_dup(res, "solar_noon");
             if (t) { out->solar_noon = parse_iso(t); free(t); }
-            out->day_length_sec = wt_json_num(res, "day_length", 0);
+            out->day_length_sec = wt_json_num(res, "day_length", NAN);
             if (out->sunrise && out->sunset) {
                 free(json);
                 return 0;
@@ -448,12 +448,12 @@ int wt_usgs_quakes_recent(wt_quake_t *out, int max) {
 
         wt_quake_t *q = &out[count];
         memset(q, 0, sizeof(*q));
-        q->mag = wt_json_num(blk, "mag", 0);
+        q->mag = wt_json_num(blk, "mag", NAN);
         char *place = wt_json_dup(blk, "place");
         if (place) { strncpy(q->place, place, sizeof(q->place)-1); free(place); }
         char *url = wt_json_dup(blk, "detail");
         if (url) { strncpy(q->url, url, sizeof(q->url)-1); free(url); }
-        q->time = (time_t)wt_json_num(blk, "time", 0) / 1000;
+        q->time = (time_t)wt_json_num(blk, "time", NAN) / 1000;
         count++;
         free(blk);
         p = end + 1;
@@ -488,14 +488,15 @@ int wt_wttr_in(const char *city, wt_outdoor_t *out) {
         out->weather_code = atoi(wc);
         free(wc);
     } else {
-        out->weather_code = 0;
+        out->weather_code = -1;
     }
 
-    out->wind_speed  = wt_json_num(obj, "windspeedKmph", 0);
-    out->precipitation = wt_json_num(obj, "precipMM", 0);
-    out->cloud_cover = wt_json_num(obj, "cloudcover", 0);
+    out->wind_speed  = wt_json_num(obj, "windspeedKmph", NAN);
+    out->precipitation = wt_json_num(obj, "precipMM", NAN);
+    out->cloud_cover = wt_json_num(obj, "cloudcover", NAN);
     out->pressure_msl = wt_json_num(obj, "pressure", NAN);
-    out->visibility   = wt_json_num(obj, "visibility", 0) * 1000.0; /* km → m */
+    out->visibility   = wt_json_num(obj, "visibility", NAN) * 1000.0; /* km → m */
+    if (isnan(out->visibility)) out->visibility = NAN;
 
     /* 描述 - weatherDesc:[{...}] */
     const char *wd = strstr(obj, "\"weatherDesc\"");
