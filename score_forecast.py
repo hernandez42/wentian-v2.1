@@ -110,9 +110,12 @@ def get_metar_near(ts_target: int, window: int = 1800) -> dict:
     try:
         conn = sqlite3.connect(WENTIAN_DB)
         cur = conn.cursor()
+        # ⚠ 修复(2026-09-06): METAR缺测值以0.0入库, 直接对比产生1000hPa假MAE
+        # — 温度/海压为0的行按字段剔除(NULLIF)
         cur.execute(
-            "SELECT ts, temp, dewpoint, altim, raw "
+            "SELECT ts, NULLIF(temp,0.0), dewpoint, NULLIF(altim,0.0), raw "
             "FROM metar WHERE icao='ZPPP' AND ts >= ? AND ts <= ? "
+            "AND temp != 0.0 AND altim != 0.0 "
             "ORDER BY ABS(ts - ?) LIMIT 1",
             (ts_target - window, ts_target + window, ts_target)
         )
@@ -203,35 +206,41 @@ def do_evaluate():
 
             pred_temp = pred_press = None
 
-            # 从不同格式提取预测值
-            if source in ('forecast', 'ultimate_forecast'):
-                # 尝试1h/3h/6h键
-                key = f'{lead_h}h'
-                if key in data:
-                    pred_temp = data[key].get('temp')
-                    pred_press = data[key].get('press')
-                # 或hourly数组
-                elif 'hourly' in data:
-                    hourly = data['hourly']
-                    if isinstance(hourly, list) and len(hourly) >= lead_h:
-                        item = hourly[lead_h - 1] if lead_h <= len(hourly) else hourly[-1]
-                        pred_temp = item.get('temp') or item.get('temperature')
-                        pred_press = item.get('press') or item.get('pressure')
-            elif source == 'chronos':
-                # chronos可能有predictions数组
-                preds = data.get('predictions', data.get('forecast', []))
+            # ⚠ 修复(2026-09-06): 字段路径与实际JSON结构完全对齐 —
+            # 旧代码找 data['1h']['temp']/data['hourly']/source=='chronos',
+            # 实际结构是 forecast_1h.T/P、temperature['1h']、1h_median、
+            # 且记录源名带 _result 后缀 → 评分管道自上线起0条评估。
+            if source == 'forecast':
+                key = f'forecast_{lead_h}h'
+                blk = data.get(key)
+                if isinstance(blk, dict):
+                    pred_temp = blk.get('T')
+                    pred_press = blk.get('P')
+            elif source == 'ultimate_forecast':
+                t_blk = data.get('temperature', {})
+                p_blk = data.get('pressure', {})
+                if isinstance(t_blk, dict):
+                    pred_temp = t_blk.get(f'{lead_h}h')
+                if isinstance(p_blk, dict):
+                    pred_press = p_blk.get(f'{lead_h}h')
+            elif source in ('chronos', 'chronos_result'):
+                t_blk = data.get('temp', {})
+                p_blk = data.get('pressure', {})
+                if isinstance(t_blk, dict):
+                    pred_temp = t_blk.get(f'{lead_h}h_median')
+                if isinstance(p_blk, dict):
+                    pred_press = p_blk.get(f'{lead_h}h_median')
+            elif source in ('kriging', 'kriging_result'):
+                # kriging 只输出气压序列预测(逐时), 温度暂无
+                preds = data.get('pressure_predictions')
                 if isinstance(preds, list) and len(preds) >= lead_h:
-                    item = preds[lead_h - 1] if lead_h <= len(preds) else preds[-1]
-                    pred_temp = item.get('temp') or item.get('temperature')
-                    pred_press = item.get('press') or item.get('pressure')
-            elif source == 'kriging':
-                # kriging是空间插值, 取最近点
-                pred_temp = data.get('predicted_temp')
-                pred_press = data.get('predicted_press')
+                    pred_press = preds[lead_h - 1]
 
-            if pred_temp is None and actual.get('temp') is not None:
-                # 用nowcast的融合趋势作为简单预测
-                pass
+            # 站内压→MSL: forecast.json 的 P 是 UNO 机柜站内压(~821hPa),
+            # METAR altim 是海平面压(~1016), 不换算就是 233hPa 假MAE
+            if pred_press is not None and 700 < pred_press < 950:
+                import math
+                pred_press = pred_press * math.exp(2104.0 / 8430.0) - 38.8
 
             eval_rec = {
                 'eval_ts': now_ts,
