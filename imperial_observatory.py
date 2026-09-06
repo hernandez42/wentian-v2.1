@@ -298,7 +298,7 @@ def imperial_enhancement_run():
     }
 
     # 5. 写入 SQLite 增强表
-    c = sqlite3.connect(ANO_DB)
+    c = sqlite3.connect(WENTIAN_DB)
     try:
         c.execute("""CREATE TABLE IF NOT EXISTS imperial_enhancement (
             ts INTEGER PRIMARY KEY,
