@@ -576,7 +576,7 @@ static int export_one(sqlite3 *db, FILE *out) {
         }
     }
     fprintf(out, "{\"tec_kunming\": %.1f, \"source\": \"%s\"}", _tec_val, _tec_src);
-    fprintf(out, ",\n");
+    fprintf(out, "\n");
 
     fprintf(out, "  },\n");  /* data 块结束 */
     fprintf(out, "  \"meta\": {\n");
