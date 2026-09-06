@@ -57,8 +57,12 @@ int wt_openmeteo_current(wt_outdoor_t *out) {
         "precipitation_sum,precipitation_probability_max,"
         "wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant"
         "&timezone=Asia%%2FShanghai"
-        "&models=google_weather_next"
         "&forecast_days=15",
+        /* ⚠ 修复(2026-09-06): 删除 models=google_weather_next —
+         * Open-Meteo 已下线该模型名, API 返回
+         * "Cannot initialize MultiDomains from invalid String value"
+         * 导致 Step1 整步失败, outdoor 表冻结16小时+, 卡片 UV/云量/实况全变0.
+         * 不指定 models 时 Open-Meteo 自动选 best_match 多源融合, 更优 */
         WENTIAN_LAT, WENTIAN_LON);
 
     char *json = wt_http_get(url, 10);

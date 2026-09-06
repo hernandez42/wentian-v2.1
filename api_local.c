@@ -79,8 +79,11 @@ int wt_local_uno(wt_uno_t *out) {
     out->cabinet_pressure = sqlite3_column_double(st, 3);
     /* 校准: UNO 机柜气压 → 海平面气压 */
     out->sea_level_pressure = sqlite3_column_double(st, 4);
-    /* 如果 sea_level_pressure 为0或NULL, 用 UNO 气压 + 校准偏移 */
-    if (out->sea_level_pressure < 900 || out->sea_level_pressure > 1100) {
+    /* 如果 sea_level_pressure 异常, 用 UNO 气压 + 校准偏移
+     * ⚠ 修复(2026-09-06): 阈值从[900,1100]收紧到[980,1040] —
+     * UNO板BMP280的QNH换算坏了, 直报1050.2hPa(实测1016),
+     * 旧阈值让它蒙混过关, 卡片"海平面气压1050"与实况差34hPa */
+    if (out->sea_level_pressure < 980 || out->sea_level_pressure > 1040) {
         double raw_p = out->cabinet_pressure;
         double alt_km = 2.104;
         /* 标准大气: P_msl = P_raw * exp(alt_km * 1000 / 8430) + offset

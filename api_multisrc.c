@@ -161,7 +161,9 @@ static double multisrc_gnss_uart_s4(double *out_avg_snr) {
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1.0;
     sqlite3_stmt *st;
     int rc = sqlite3_prepare_v2(db,
-        "SELECT s4_gps, s4_bds, gps_snr_avg, bds_snr_avg "
+        /* ⚠ 修复(2026-09-06): 列名错 — local_iono 实际列是 gps_snr/bds_snr,
+         * 旧代码写 gps_snr_avg 导致 prepare 失败, uart源S4恒-1 */
+        "SELECT s4_gps, s4_bds, gps_snr, bds_snr "
         "FROM local_iono ORDER BY ts DESC LIMIT 1",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1.0; }
@@ -208,9 +210,13 @@ static double multisrc_uno_pressure_delta(void) {
     sqlite3 *db;
     if (sqlite3_open("/root/data/ano_weather.db", &db) != SQLITE_OK) return -1.0;
     sqlite3_stmt *st;
+    /* ⚠ 修复(2026-09-06): 列名错 — ano_weather 没有 sea_level_pressure 列,
+     * 海平面气压存在 pa 列。旧查询 prepare 失败恒返回-1.0,
+     * 而调用方把 fabs(-1)>0.5 当成真实-1hPa压降 → 编造出 s4_uno=0.133
+     * "有效源", 污染5源融合。现改用 pa 列 */
     int rc = sqlite3_prepare_v2(db,
-        "SELECT sea_level_pressure FROM ano_weather "
-        "WHERE source='UNO_v2.0_bridge' AND sea_level_pressure > 0 "
+        "SELECT pa FROM ano_weather "
+        "WHERE source='UNO_v2.0_bridge' AND pa > 0 "
         "ORDER BY ts DESC LIMIT 60",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1.0; }
@@ -255,8 +261,10 @@ int wt_multisrc_run(void) {
     /* Open-Meteo Kp → 等效S4 (经验: Kp 5 ≈ S4 0.3) */
     double s4_openmeteo = (kp >= 0 && kp <= 9) ? (kp * 0.06) : -1.0;
 
-    /* UNO 气压30min变化 → 间接S4 (1.5hPa对应S4≈0.2) */
-    double s4_uno = (fabs(dp_30min) > 0.5) ? (fabs(dp_30min) / 7.5) : -1.0;
+    /* UNO 气压30min变化 → 间接S4 (1.5hPa对应S4≈0.2)
+     * ⚠ 修复(2026-09-06): dp_30min==-1.0 是"无数据"错误码, 不能当真实压降
+     * (旧逻辑 fabs(-1)>0.5 会编造出 0.133 的假S4源) */
+    double s4_uno = (dp_30min > -0.5 && fabs(dp_30min) > 0.5) ? (fabs(dp_30min) / 7.5) : -1.0;
 
     /* 源5 (ScintPi) 占位 - 当前DB无该数据, 设为-1不参与 */
     double s4_scintpi = -1.0;

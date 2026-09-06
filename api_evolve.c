@@ -83,7 +83,11 @@ static int load_forecasts(const char *predictor, int hours,
     int rc;
 
     if (strcmp(predictor, "multi_source") == 0) {
-        /* multi_source_forecast 表: 1h/3h/6h */
+        /* multi_source_forecast 表: 1h/3h/6h
+         * ⚠ 修复(2026-09-06): P_current 是 UNO 机柜站内压(~821hPa),
+         * METAR 实测是海平面压(~1016hPa), 直接相减得出 MAE=233hPa 假评分。
+         * 读出后统一换算成 MSL: P_msl = P_raw * exp(2104/8430) - 38.8
+         * (与 api_local.c UNO_P_OFFSET 同一校准) */
         rc = sqlite3_prepare_v2(db,
             "SELECT ts, T_current, P_current, final_weather FROM multi_source_forecast "
             "WHERE ts >= ? ORDER BY ts", -1, &st, NULL);
@@ -97,10 +101,14 @@ static int load_forecasts(const char *predictor, int hours,
     sqlite3_bind_int64(st, 1, (sqlite3_int64)since);
 
     int n = 0;
+    int is_ms = (strcmp(predictor, "multi_source") == 0);
     while (sqlite3_step(st) == SQLITE_ROW && n < max_n) {
         ts_arr[n]   = (time_t)sqlite3_column_int64(st, 0);
         t_pred[n]   = sqlite3_column_double(st, 1);
         p_pred[n]   = sqlite3_column_double(st, 2);
+        /* UNO机柜站内压→MSL统一尺度 (修复2026-09-06, MAE 233hPa假评分根因) */
+        if (is_ms && p_pred[n] > 700 && p_pred[n] < 950)
+            p_pred[n] = p_pred[n] * exp(2104.0 / 8430.0) - 38.8;
         const char *wx = (const char *)sqlite3_column_text(st, 3);
         if (wx && wx_pred && wx_max > 0) {
             int len = strlen(wx);

@@ -39,11 +39,16 @@ int wt_swpc_kp(wt_kp_t *out) {
         "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json", 10);
     if (!json) return -1;
 
-    /* 解析最新一条数组元素 */
+    /* 解析最新一条数组元素
+     * ⚠ 修复(2026-09-06): 旧代码取第一个'{'=数组最旧元素(12h前),
+     * 导致Kp永远显示陈旧值"Kp=0.0 (0Z)"。改为扫描全串取最后一个完整对象 */
     const char *arr_start = strchr(json, '[');
     if (!arr_start) { free(json); return -1; }
-    arr_start++;
-    const char *obj_start = strchr(arr_start, '{');
+
+    /* 找最后一个 '{' (最新元素) */
+    const char *obj_start = NULL;
+    for (const char *c = arr_start; *c; c++)
+        if (*c == '{') obj_start = c;
     if (!obj_start) { free(json); return -1; }
 
     const char *p = obj_start;

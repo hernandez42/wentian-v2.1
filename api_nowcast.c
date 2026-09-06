@@ -141,7 +141,11 @@ static int load_metar_recent(int max_rows, time_t *ts_arr, double *t_arr,
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
     sqlite3_stmt *st;
     int rc = sqlite3_prepare_v2(db,
-        "SELECT ts, temp, altim, wind_dir, wind_speed_kt, raw "
+        /* ⚠ 修复(2026-09-06): 列名错 — metar 表实际列是 wind_speed,
+         * 旧代码写 wind_speed_kt 导致 prepare 静默失败返回-1,
+         * temp_current/press_current 恒为0 → 短临预测段全0,
+         * 自进化评分拿0对比实测(温MAE 21°C假高). */
+        "SELECT ts, temp, altim, wind_dir, wind_speed, raw "
         "FROM metar WHERE icao='ZPPP' ORDER BY ts DESC LIMIT ?",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
@@ -702,10 +706,17 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
     out->precip_intensity[0] = '\0';
     out->false_cold_note[0] = '\0';
     for (int i = 0; i < 5; i++) {
-        if (scores[i] > out->score) {
-            out->score = scores[i];
-            strcpy(out->level, types[i]);
+        if (scores[i] > out->score) out->score = scores[i];
+    }
+    /* ⚠ 修复(2026-09-06): 天气型标签仅在达到"关注"级(>=26)时给出。
+     * 旧逻辑只要有非0分(哪怕PWV绝对值贡献的15分)就把level写成"雷暴",
+     * 卡片上出现"雷暴 评分15/100 告警=无"的自相矛盾显示 */
+    if (out->score >= 26) {
+        for (int i = 0; i < 5; i++) {
+            if (scores[i] == out->score) { strcpy(out->level, types[i]); break; }
         }
+    } else {
+        strcpy(out->level, "稳定");
     }
     if (out->score > 100) out->score = 100;
 
