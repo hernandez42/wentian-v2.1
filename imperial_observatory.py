@@ -165,7 +165,7 @@ def wuxing_quadrant(wx):
         return '木旺金衰·风象活跃', 45
     elif metal > wood + 20:
         return '金旺木衰·气流受压', 50
-    elif earth > all(v * 0.7 for v in vals):
+    elif all(earth > v * 0.7 for v in vals):
         return '土气过盛·系统胶着', 55
     else:
         return '相生相克·动态平衡', 65
