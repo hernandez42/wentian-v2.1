@@ -99,7 +99,9 @@ int wt_db_init(const char *path) {
         sqlite3_stmt *st; \
         if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) { \
             __VA_ARGS__; \
-            sqlite3_step(st); \
+            int rc = sqlite3_step(st); \
+            if (rc != SQLITE_DONE) \
+                fprintf(stderr, "[WARN] DB_SAVE(%s) rc=%d: %s\n", #name, rc, sqlite3_errmsg(db)); \
         } \
         sqlite3_finalize(st); \
         sqlite3_close(db); \

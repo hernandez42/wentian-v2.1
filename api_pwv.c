@@ -101,7 +101,7 @@ static int load_uno_latest(double *t, double *rh, double *p_sea, time_t *ts) {
 
     sqlite3_stmt *st;
     int rc = sqlite3_prepare_v2(db,
-        "SELECT ts,t,h,p FROM ano_weather "
+        "SELECT ts,t,h,pa FROM ano_weather "
         "WHERE source='UNO_v2.0_bridge' ORDER BY ts DESC LIMIT 1", -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
     if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); sqlite3_close(db); return -1; }

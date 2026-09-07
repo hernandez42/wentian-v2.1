@@ -150,16 +150,18 @@ static int load_gnss_snr(double *gps_snrs, int gps_max,
 /* 输入: 纬度(度), 经度(度), 海拔(m), UTC秒数(当天)
  * 输出: 垂直延迟(s), 斜向延迟(s), 斜向因子, 周期(s)
  */
-static void klobuchar_model(double lat_deg, double lon_deg, double alt_m,
+static void klobuchar_model(double lat_deg, double lon_deg, double elev_deg,
                             double utc_sec,
                             double *vert_delay, double *slant_delay,
                             double *slant_factor, double *period_s) {
     double lat = lat_deg / 180.0;  /* 半圆 */
     double lon = lon_deg / 180.0;
-    double alt_km = alt_m / 1000.0;
+    double E_semi = elev_deg / 180.0;  /* 仰角转半圆 */
+    if (E_semi < 0.05) E_semi = 0.055;  /* ~10° 下限 */
+    if (E_semi > 0.85) E_semi = 0.85;   /* ~153° 上限 */
 
-    /* 地心角(秒) */
-    double psi = 0.0137 / (alt_km + 0.11) - 0.022;
+    /* 地心角(半圆) — 用卫星仰角E, 非接收机海拔! */
+    double psi = 0.0137 / (E_semi + 0.11) - 0.022;
 
     /* 测站地心纬度(半圆) */
     double phi_i = lat + psi * cos(M_PI * lat);
@@ -171,8 +173,9 @@ static void klobuchar_model(double lat_deg, double lon_deg, double alt_m,
     while (t < 0) t += 86400;
     while (t >= 86400) t -= 86400;
 
-    /* 倾斜因子 */
-    double f = 1.0 + 16.0 * pow(0.53 - alt_km / 57.3, 3);
+    /* 倾斜因子: f = 1 + 16*(0.53 - E_semi)³, 式中E_semi是仰角半圆 */
+    double f = 1.0 + 16.0 * pow(0.53 - E_semi, 3);
+    if (f < 1.0) f = 1.0;
 
     /* 周期(秒) */
     double p = KLOB_BETA[0] + KLOB_BETA[1] * (phi_i / M_PI)
@@ -265,7 +268,8 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts) {
     struct tm tm_utc;
     gmtime_r(&ts, &tm_utc);
     double utc_sec = tm_utc.tm_hour * 3600 + tm_utc.tm_min * 60 + tm_utc.tm_sec;
-    klobuchar_model(LAT, LON, ALT, utc_sec,
+    /* 默认卫星仰角30° (典型中纬度), 非接收机海拔! */
+    klobuchar_model(LAT, LON, 30.0, utc_sec,
                     &out->klob_vert_delay, &out->klob_slant_delay,
                     &out->klob_slant_factor, &out->klob_period);
 

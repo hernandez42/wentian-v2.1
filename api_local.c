@@ -297,16 +297,16 @@ int wt_local_db_init(const char *path) {
     char *err = NULL;
     const char *sqls[] = {
         "CREATE TABLE IF NOT EXISTS local_uno ("
-        "  ts INTEGER, cabinet_t REAL, cabinet_h REAL, cabinet_p REAL,"
+        "  ts INTEGER PRIMARY KEY, cabinet_t REAL, cabinet_h REAL, cabinet_p REAL,"
         "  sea_p REAL, altitude REAL, weather TEXT)",
         "CREATE TABLE IF NOT EXISTS local_gnss ("
-        "  ts INTEGER, lat REAL, lon REAL, alt REAL, fix INTEGER,"
+        "  ts INTEGER PRIMARY KEY, lat REAL, lon REAL, alt REAL, fix INTEGER,"
         "  total_sats INTEGER, gps_sats INTEGER, bds_sats INTEGER,"
         "  glonass_sats INTEGER, pdop REAL, hdop REAL, vdop REAL,"
         "  altitude_msl REAL, speed_kts INTEGER, heading_deg INTEGER,"
         "  gps_snr REAL, bds_snr REAL)",
         "CREATE TABLE IF NOT EXISTS local_iono ("
-        "  ts INTEGER, s4_gps REAL, s4_bds REAL, gps_snr REAL, bds_snr REAL,"
+        "  ts INTEGER PRIMARY KEY, s4_gps REAL, s4_bds REAL, gps_snr REAL, bds_snr REAL,"
         "  pdop_avg REAL, vdop_avg REAL, klob_slant REAL, activity TEXT)",
         "CREATE TABLE IF NOT EXISTS local_sdr ("
         "  ts INTEGER, file TEXT, band TEXT, noise_dbm REAL,"

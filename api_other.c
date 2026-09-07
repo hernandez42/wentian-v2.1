@@ -436,25 +436,43 @@ int wt_usgs_quakes_recent(wt_quake_t *out, int max) {
 
     int count = 0;
     const char *p = features;
-    while (count < max && (p = strstr(p, "\"properties\":{"))) {
-        const char *end = strchr(p, '}');
-        if (!end) break;
-        size_t len = end - p + 1;
-        char *blk = malloc(len + 1);
-        memcpy(blk, p, len);
-        blk[len] = '\0';
+    while (count < max) {
+        /* 找feature层的 '{' (前于 properties) */
+        p = strchr(p, '{');
+        if (!p) break;
+        char *feat = dup_obj(p);
+        if (!feat) { p++; continue; }
+
+        /* 跳过已处理的feat到匹配的'}'之后 */
+        p = strchr(p, '}');
+        if (p) p++;
 
         wt_quake_t *q = &out[count];
         memset(q, 0, sizeof(*q));
-        q->mag = wt_json_num(blk, "mag", NAN);
-        char *place = wt_json_dup(blk, "place");
-        if (place) { strncpy(q->place, place, sizeof(q->place)-1); free(place); }
-        char *url = wt_json_dup(blk, "detail");
+
+        /* properties 在 feat 内部 */
+        const char *props = strstr(feat, "\"properties\":{");
+        if (props) {
+            const char *end = strchr(props, '}');
+            if (end) {
+                size_t len = end - props + 1;
+                char *blk = malloc(len + 1);
+                memcpy(blk, props, len);
+                blk[len] = '\0';
+                q->mag = wt_json_num(blk, "mag", NAN);
+                char *place = wt_json_dup(blk, "place");
+                if (place) { strncpy(q->place, place, sizeof(q->place)-1); free(place); }
+                q->time = (time_t)wt_json_num(blk, "time", NAN) / 1000;
+                free(blk);
+            }
+        }
+
+        /* detail 在feature层(与properties同级), 非properties内 */
+        char *url = wt_json_dup(feat, "detail");
         if (url) { strncpy(q->url, url, sizeof(q->url)-1); free(url); }
-        q->time = (time_t)wt_json_num(blk, "time", NAN) / 1000;
+
+        free(feat);
         count++;
-        free(blk);
-        p = end + 1;
     }
     free(json);
     return count;
