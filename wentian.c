@@ -37,6 +37,7 @@
  * 信号: daemon模式可被SIGINT/SIGTERM打断 (未实现优雅退出)
  * ============================================================ */
 #include "wentian.h"
+#include <sqlite3.h>
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
