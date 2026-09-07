@@ -511,7 +511,19 @@ int wentian_collect_all(void) {
     {
         int rc = system("python3 /root/scripts/wentian/watching.py 2>/dev/null");
         (void)rc;
-        rc = system("python3 /root/scripts/wentian/weathernext_fetch.py 2>/dev/null");
+    /* WeatherNext 2 — 每3小时刷新一次(防Open-Meteo 429限流) */
+    {
+        struct stat wn_st;
+        int wn_age = 999999;
+        if (stat("/root/data/fusion/weathernext_forecast.json", &wn_st) == 0) {
+            wn_age = (int)(time(NULL) - wn_st.st_mtime);
+        }
+        if (wn_age > 10800) {  /* >3小时 */
+            rc = system("python3 /root/scripts/wentian/weathernext_fetch.py 2>/dev/null");
+            printf("  📊 WeatherNext: 刷新(%ds旧→%s)\n",
+                   wn_age, rc == 0 ? "OK" : "失败");
+        }
+    }
         (void)rc;
         /* ⚠ 修复(2026-09-06): 真实TEC源替代硬编码Klobuchar — IGS WHU实时GIM */
         rc = system("python3 /root/scripts/wentian/wt_fetch_tec.py 2>/dev/null");
