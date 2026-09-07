@@ -295,7 +295,7 @@ int wt_nasa_donki_list(wt_donki_type_t type, wt_donki_event_t *out, int max) {
         if (t) {
             /* 截取首行或前120字符 */
             char *nl = strchr(t, '\n');
-            if (nl && nl - t < sizeof(e->note)) *nl = '\0';
+            if (nl && nl - t < (long)sizeof(e->note)) *nl = '\0';
             strncpy(e->note, t, sizeof(e->note)-1);
             free(t);
         }

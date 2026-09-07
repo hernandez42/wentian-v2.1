@@ -219,7 +219,7 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts) {
     out->ts = ts;
 
     /* 位置: 昆明长水 */
-    const double LAT = 25.09917, LON = 102.92667, ALT = 2103.0;
+    const double LAT = 25.09917, LON = 102.92667;
 
     /* 加载SNR数据 */
     double gps_snrs[64] = {0}, bds_snrs[64] = {0}, pdops[32] = {0};

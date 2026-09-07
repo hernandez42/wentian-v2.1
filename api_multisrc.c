@@ -63,8 +63,9 @@ static const char *s4_level_class(double s4) {
  * 主人硬件限制: 扫频数据来自gnss_sweep_v2/, 每次扫频多bin
  * 取所有扫频的SNR>3dB峰, 算峰间峰内RSD作为S4_t */
 static double multisrc_sdr_s4(double *out_peak_snr, double *out_peak_freq_mhz) {
-    struct stat st;
-    int found = 0;
+    (void)out_peak_snr; (void)out_peak_freq_mhz;
+    struct stat st; (void)st;
+    int found = 0; (void)found;
 
     /* 优先读 GPS-L1 扫频 */
     FILE *fp = fopen("/root/data/sdr/gnss_sweep_v2/GPS-L1.csv", "r");

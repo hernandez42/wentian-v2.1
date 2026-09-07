@@ -15,7 +15,7 @@
  *
  * 数据源:
  *   主库:   /root/data/ano_weather.db (主人UNO+北斗硬件DB)
- *   CSV:    /root/data/sdr/v4_sweep_20260902_v2/*.csv
+ *   CSV:    /root/data/sdr/v4_sweep_20260902_v2/ (扫频csv)
  *
  * UNO表schema (ano_weather):
  *   ts, source, t, h, p, pa, alt, wx
