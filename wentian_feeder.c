@@ -486,9 +486,9 @@ static int export_one(sqlite3 *db, FILE *out) {
     /* roti不是最后一块 */
     fprintf(out, "    },\n");
 
-    /* 25. 星象 (astral.json) */
-    fprintf(out, "    \"astral\": {\n");
-    FILE *af = fopen("/root/data/fusion/astral.json", "r");
+    /* 25. 钦天监v3.0 (watching.json) */
+    fprintf(out, "    \"watching\": {\n");
+    FILE *af = fopen("/root/data/fusion/watching.json", "r");
     char anote[256] = {0};
     strcpy(anote, "日月星曜各安其位");
     if (af) {

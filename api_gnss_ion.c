@@ -47,86 +47,6 @@ static const double KLOB_BETA[4]  = {91136.0, 65536.0, -393216.0, 393216.0};
 /* ── 电离层活动评估 ────────────────────────────────────── */
 /* v1.0 旧分级已废弃, 见下方 s4_level_class() 国际标准分级 */
 
-/* ── S4指数计算 ────────────────────────────────────────── */
-/* v1.0 旧算法: SNR 直接计算 (单位dB, 1分钟窗口, 兼容性保留)
- *   S4 = stddev(SNR) / mean(SNR)
- *   缺点: SNR 是对数刻度, 算出的 S4 与 ScintPi/ISMR 标准值有系统偏差 */
-static double calc_s4_v1(const double *snr_db, int n) {
-/* UNUSED_FUNC */
-    if (n < 5) return -1.0;
-    double mean = 0.0;
-    for (int i = 0; i < n; i++) mean += snr_db[i];
-    mean /= n;
-    if (mean <= 0) return -1.0;
-    double var = 0.0;
-    for (int i = 0; i < n; i++) {
-        double d = snr_db[i] - mean;
-        var += d * d;
-    }
-    double sd = sqrt(var / (n > 1 ? n - 1 : 1));
-    return sd / mean;
-}
-
-/* ── v2.0 标准算法 (Van Dierendonck S4_t_total) ──────────── */
-/* 国际标准 (Van Dierendonck et al. 1993, GPS World):
- *   1. SNR(dB) → C/N0(线性) = 10^(SNR/10)
- *   2. 功率 I = C/N0² (即信号强度平方)
- *   3. S4_t_total = sqrt(Var(I)) / mean(I)
- *
- * 物理意义: S4 是信号功率强度的归一化标准差, 直接反映闪烁强度
- * 单位: 无量纲 (0~1, 0=无闪烁, 1=完全闪烁)
- *
- * 数据质量门控 (国际标准):
- *   - 剔除 SNR<35 dB-Hz 的样本 (卫星仰角低/信号弱, 不适合闪烁分析)
- *   - 至少需要 60 个有效样本 (1分钟 @1Hz)
- *
- * 输入: SNR 数组 (单位 dB-Hz, 典型 30-55 dB-Hz)
- * 输出: S4 值, 失败返回 -1
- */
-static double calc_s4_standard(const double *snr_db, int n) {
-/* UNUSED_FUNC */
-    if (n < 60) return -1.0;  /* 至少1分钟1Hz样本 */
-
-    /* 步骤1: SNR(dB) → C/N0(线性) → I = C/N0², 剔除低质量样本 */
-    double *I = (double *)malloc(sizeof(double) * n);
-    if (!I) return -1.0;
-
-    int valid = 0;
-    for (int i = 0; i < n; i++) {
-        /* 数据质量门控: C/N0 < 35 dB-Hz 不计入 (Van Dierendonck 1993 §3.2)
-         * 原因: 弱信号下 C/N0 测量噪声大, 转换到 I=C/N0² 后误差被平方放大
-         * 会导致虚假 S4 异常高 (>0.5) */
-        if (snr_db[i] < 35.0) continue;
-
-        /* C/N0 (dB-Hz) → 线性比例: 10^(SNR/10) */
-        double cn0_linear = pow(10.0, snr_db[i] / 10.0);
-        /* 信号功率 I = (C/N0)^2 */
-        I[valid] = cn0_linear * cn0_linear;
-        if (I[valid] > 0) valid++;
-    }
-    if (valid < 30) { free(I); return -1.0; }  /* 剔除后需至少30个有效样本 */
-
-    /* 步骤2: 算 mean(I) 和 mean(I²) */
-    double I_sum = 0.0, I2_sum = 0.0;
-    for (int i = 0; i < valid; i++) {
-        I_sum  += I[i];
-        I2_sum += I[i] * I[i];
-    }
-    double I_mean = I_sum / valid;
-    double I2_mean = I2_sum / valid;
-
-    if (I_mean <= 0) { free(I); return -1.0; }
-
-    /* 步骤3: Var(I) = E[I²] - E[I]², 然后 S4 = sqrt(Var(I))/mean(I) */
-    double I_var = I2_mean - I_mean * I_mean;
-    if (I_var < 0) I_var = 0;  /* 数值噪声保护 */
-
-    double s4 = sqrt(I_var) / I_mean;
-
-    free(I);
-    return s4;
-}
-
 /* ── S4 国际标准闪烁等级 ───────────────────────────────── */
 static const char *s4_level_class(double s4) {
     if (s4 < 0) return "NO DATA";
@@ -189,15 +109,6 @@ static double calc_s4_robust_low_snr(const double *snr_db, int n,
     if (out_avg) *out_avg = mean;
     if (out_valid_count) *out_valid_count = count;
     return s4;
-}
-
-/* ── v1.0 兼容等级 (旧算法阈值, 保留) ─────────────────── */
-static const char *ion_activity_from_s4(double s4_max) {
-/* UNUSED_FUNC */
-    if (s4_max < 0.05) return "QUIET";
-    if (s4_max < 0.15) return "WEAK";
-    if (s4_max < 0.30) return "MODERATE";
-    return "STRONG";
 }
 
 /* ── 从DB加载最近N分钟GNSS SNR ─────────────────────────── */

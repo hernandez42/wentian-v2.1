@@ -40,20 +40,6 @@
 #include <unistd.h>
 
 /* ── 工具: 找第N个JSON对象 ──────────────────────────────── */
-/* find_nth_obj — 未使用, 保留为注释 */
-/*
-static const char *find_nth_obj(const char *json, int n) {
-    const char *p = json;
-    for (int i = 0; i <= n; i++) {
-        p = strchr(p, '{');
-        if (!p) return NULL;
-        if (i < n) p++;
-    }
-    return p;
-}
-*/
-
-/* 拷贝 JSON 顶层对象 (含嵌套) */
 static char *dup_obj(const char *start) {
     if (!start || *start != '{') return NULL;
     int depth = 1;
