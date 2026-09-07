@@ -1,3 +1,4 @@
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
 /* ============================================================
  * wt_metar_fallback.c - METAR 多源备选引擎 v1.0
  * ============================================================
@@ -122,11 +123,7 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
     return 0;
 }
 
-/* ── 源B: OGIMET 法国网站抓取 ────────────────────────── */
-static int fetch_ogimet_metar(wt_metar_fallback_t *out) {
-    (void)out;
-    return -1;  /* OGIMET降级, 不再使用 */
-}
+/* ── 源B: OGIMET 降级, 不再使用 ──────────────────────── */
 
 /* ── 源C: NWS tgftp 原始TXT ────────────────────────────── */
 static int fetch_nws_tgftp(wt_metar_fallback_t *out) {

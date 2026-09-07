@@ -1,3 +1,5 @@
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
 /* ============================================================
  * api_evolve.c - 问天自进化自愈自完善引擎 v1.0 (C实现)
  * ============================================================
@@ -321,7 +323,8 @@ static const wt_health_t HEALTH_CHECKS[] = {
 #define HEALTH_N (sizeof(HEALTH_CHECKS)/sizeof(HEALTH_CHECKS[0]))
 
 static int wt_self_heal_check(char *alerts_out, int max_len,
-                               /* unused */ int *out_restarted_count) {
+                               int *out_restarted_count) {
+    (void)out_restarted_count;
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
 

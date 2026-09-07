@@ -1,3 +1,4 @@
+#pragma GCC diagnostic ignored "-Wformat-truncation"
 /* ============================================================
  * api_nowcast.c - 短临Nowcasting v1.5 (长水全天气型)
  * ============================================================
@@ -246,11 +247,12 @@ static int score_thunderstorm(const wt_nowcast_t *nc, char *alert, int *pos,
 /* ── 飑线评分 ─────────────────────────────────────────── */
 /* 特征: 气压骤升 + 风向突变 + PWV骤降(飑线过境) */
 static int score_squall_line(int metar_n, const time_t *ts_arr, const double *p_arr,
-                              const double *wd_arr, const double *ws_arr, /* unused */
-                              /* unused */ const char *raw_arr, int raw_len,
+                              const double *wd_arr, const double *ws_arr,
+                              const char *raw_arr, int raw_len,
                               const double *pwv_times, const double *pwv_arr, int pwv_n,
                               double *squall_press, double *squall_wd, double *squall_pwv,
                               char *alert, int *pos) {
+    (void)ws_arr; (void)raw_arr; (void)raw_len;
     int score = 0;
     *squall_press = *squall_wd = *squall_pwv = 0.0;
 
@@ -391,6 +393,7 @@ static int score_stationary(int metar_n, const time_t *ts_arr, const double *t_a
                              char *alert, int *pos,
                              /* 需从外部传入湿度数据 */
                              double hum_recent[6]) {
+    (void)ts_arr; (void)raw_arr; (void)raw_len;
     int score = 0;
     *stat_humid_avg = 0.0; *stat_press_var = 0.0;
 

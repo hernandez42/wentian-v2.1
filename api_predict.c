@@ -1,3 +1,5 @@
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
 /* ============================================================
  * api_predict.c - 多源融合预测引擎 v1.0 (C实现)
  * ============================================================
@@ -184,6 +186,7 @@ static int load_uno_pressure(int hours, double *p_series, int max_n) {
 static int load_outdoor(double *T, double *H, double *P_unused, double *dew,
                          double *cloud_3h, double *rain_prob_3h,
                          double *T1h, double *T3h, double *T6h) {
+    (void)P_unused;
     sqlite3 *db;
     if (sqlite3_open(ANO_DB, &db) != SQLITE_OK) return -1;
     sqlite3_stmt *st;

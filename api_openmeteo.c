@@ -1,3 +1,4 @@
+#pragma GCC diagnostic ignored "-Wformat-truncation"
 /* ============================================================
  * api_openmeteo.c - Open-Meteo 一族 (8子API) v1.1
  * ============================================================
