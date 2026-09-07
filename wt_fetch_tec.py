@@ -18,7 +18,7 @@ import json, os, sys, struct, time
 from datetime import datetime, timedelta
 
 OUT = '/root/data/fusion/tec_realtime.json'
-LAT, LON = 25.08, 102.91  # 昆明长水
+LAT, LON = 25.09917, 102.92667  # 昆明长水
 
 
 def _fetch_url(url, timeout=15):

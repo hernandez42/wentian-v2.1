@@ -34,7 +34,7 @@
 #define NOAA_KP_1M_URL       "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json"
 #define NOAA_F107_URL        "https://services.swpc.noaa.gov/json/f107_cm_flux.json"
 #define NOAA_KP_HIST_URL     "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"
-#define METNO_FORECAST_URL   "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=25.0820&lon=102.9129&altitude=2103"
+#define METNO_FORECAST_URL   "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=25.09917&lon=102.92667&altitude=2103"
 #define WTTR_URL             "https://wttr.in/Kunming?format=j1"
 #define EXTERNAL_JSON        "/root/data/fusion/external_data.json"
 

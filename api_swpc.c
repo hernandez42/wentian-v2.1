@@ -168,7 +168,7 @@ int wt_swpc_scales(wt_swpc_scale_t *out) {
         if (gp) {
             int gd = 1; const char *ge = gp + 1;
             while (*ge && gd > 0) { if (*ge == '{') gd++; else if (*ge == '}') gd--; ge++; }
-            char *gsnip = malloc(ge - gp); memcpy(gsnip, gp, ge-gp); gsnip[ge-gp]='\0';
+            char *gsnip = malloc(ge - gp + 1); memcpy(gsnip, gp, ge-gp); gsnip[ge-gp]='\0';
             out->g_scale = wt_json_int_neg1(gsnip, "Scale");
             char *g_t = wt_json_dup(gsnip, "Text");
             if (g_t) { strncpy(out->g_text, g_t, sizeof(out->g_text)-1); free(g_t); }
@@ -182,7 +182,7 @@ int wt_swpc_scales(wt_swpc_scale_t *out) {
         if (sp) {
             int sd = 1; const char *se = sp + 1;
             while (*se && sd > 0) { if (*se == '{') sd++; else if (*se == '}') sd--; se++; }
-            char *ssnip = malloc(se - sp); memcpy(ssnip, sp, se-sp); ssnip[se-sp]='\0';
+            char *ssnip = malloc(se - sp + 1); memcpy(ssnip, sp, se-sp); ssnip[se-sp]='\0';
             out->s_scale = wt_json_int_neg1(ssnip, "Scale");
             out->s_prob = wt_json_int_neg1(ssnip, "Prob");
             char *s_t = wt_json_dup(ssnip, "Text");
@@ -197,7 +197,7 @@ int wt_swpc_scales(wt_swpc_scale_t *out) {
         if (rp) {
             int rd = 1; const char *re_ = rp + 1;
             while (*re_ && rd > 0) { if (*re_ == '{') rd++; else if (*re_ == '}') rd--; re_++; }
-            char *rsnip = malloc(re_ - rp); memcpy(rsnip, rp, re_-rp); rsnip[re_-rp]='\0';
+            char *rsnip = malloc(re_ - rp + 1); memcpy(rsnip, rp, re_-rp); rsnip[re_-rp]='\0';
             out->r_scale = wt_json_int_neg1(rsnip, "Scale");
             out->r_minor_prob = wt_json_int_neg1(rsnip, "MinorProb");
             out->r_major_prob = wt_json_int_neg1(rsnip, "MajorProb");
@@ -223,13 +223,17 @@ void wt_kf_init(wt_kf_filter_t *f, double x0, double q, double r) {
 
 /* 多源气压融合 (机柜+Open-Meteo+METAR) */
 double wt_kf_fuse_pressure(wt_kf_filter_t *f, double p_uno, double p_openmeteo, double p_metar) {
-    /* 取最近一次融合值 */
-    if (f->n_obs == 0) {
-        f->last_value = (p_uno + p_openmeteo + p_metar) / 3.0;
-    }
-    f->last_value = kf1d_update(&f->kf, f->last_value);
+    /* 每次真融合: 有效源取平均作当前观测, 喂入Kalman (不是喂自己上次输出) */
+    double obs = 0;
+    int nvalid = 0;
+    if (p_uno > 0)       { obs += p_uno;       nvalid++; }
+    if (p_openmeteo > 0) { obs += p_openmeteo; nvalid++; }
+    if (p_metar > 0)     { obs += p_metar;     nvalid++; }
+    if (nvalid == 0) return (f->n_obs > 0) ? f->kf.x : 0;
+
+    obs /= nvalid;
     f->n_obs++;
-    return f->kf.x;
+    return kf1d_update(&f->kf, obs);
 }
 
 /* Kalman 温度平滑 (消除机柜恒温/室外跳变) */

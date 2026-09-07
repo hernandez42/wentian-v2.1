@@ -88,7 +88,7 @@ static int export_one(sqlite3 *db, FILE *out) {
     fprintf(out, "  \"version\": \"1.1\",\n");
     fprintf(out, "  \"generated_at\": %ld,\n", (long)time(NULL));
     fprintf(out, "  \"source\": \"问天 v1.1 (WenTian Weather Station)\",\n");
-    fprintf(out, "  \"lat\": 25.0820, \"lon\": 102.9097, \"alt\": 2115,\n");
+    fprintf(out, "  \"lat\": 25.09917, \"lon\": 102.92667, \"alt\": 2115,\n");
     fprintf(out, "  \"data\": {\n");
 
     /* 1. outdoor */

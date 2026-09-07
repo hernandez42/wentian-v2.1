@@ -130,8 +130,8 @@ static int load_uno_latest(double *t, double *rh, double *p_sea, time_t *ts) {
 
 /* ── 从GNSS取最新坐标 ──────────────────────────────────── */
 static int load_gnss_pos(double *lat, double *lon, double *alt) {
-    *lat = 25.0808;
-    *lon = 102.9129;
+    *lat = 25.09917;
+    *lon = 102.92667;
     *alt = 2103.0;  /* 默认初始化, 防止未使用警告 */
 
     sqlite3 *db;
@@ -153,8 +153,8 @@ static int load_gnss_pos(double *lat, double *lon, double *alt) {
     sqlite3_finalize(st);
     sqlite3_close(db);
     /* 回退: 主人家固定坐标 */
-    *lat = 25.0808;
-    *lon = 102.9129;
+    *lat = 25.09917;
+    *lon = 102.92667;
     *alt = 2103.0;
     return 0;
 }

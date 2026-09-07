@@ -32,6 +32,7 @@
 #include "wentian.h"
 #include <sys/stat.h>
 #include <sqlite3.h>
+#include <glob.h>
 
 /* 主人数据库路径 (硬编码,因为是主人专用数据库) */
 #define OWNER_DB "/root/data/ano_weather.db"
@@ -200,12 +201,28 @@ int wt_local_iono(wt_iono_t *out) {
 
 int wt_local_sdr(wt_sdr_t *out, int max, int *count) {
     *count = 0;
+    /* 动态找最新扫频目录 (不写死日期) */
+    char sweep_dir[256] = {0};
+    {
+        glob_t g;
+        memset(&g, 0, sizeof(g));
+        int grc = glob("/root/data/sdr/*sweep*", GLOB_ONLYDIR, NULL, &g);
+        if (grc == 0 && g.gl_pathc > 0) {
+            /* 取字典序最大(日期最新的)目录 */
+            snprintf(sweep_dir, sizeof(sweep_dir), "%s", g.gl_pathv[g.gl_pathc - 1]);
+        }
+        globfree(&g);
+    }
+    if (sweep_dir[0] == '\0') {
+        /* 兜底: 没有sweep目录则跳过 */
+        return 0;
+    }
+
     /* CSV格式: date, time, start_hz, end_hz, bin_hz, num_bins, dBm1, dBm2, ... */
-    const char *files[] = {
-        "/root/data/sdr/v4_sweep_20260902_v2/amateu2m_144M-148M.csv",
-        "/root/data/sdr/v4_sweep_20260902_v2/amateu70cm_430M-440M.csv",
-        "/root/data/sdr/v4_sweep_20260902_v2/marine_156M-163M.csv",
-    };
+    char files[3][256];
+    snprintf(files[0], sizeof(files[0]), "%s/amateu2m_144M-148M.csv", sweep_dir);
+    snprintf(files[1], sizeof(files[1]), "%s/amateu70cm_430M-440M.csv", sweep_dir);
+    snprintf(files[2], sizeof(files[2]), "%s/marine_156M-163M.csv", sweep_dir);
     const char *bands[] = {
         "业余2m (144-148MHz)",
         "业余70cm (430-440MHz)",

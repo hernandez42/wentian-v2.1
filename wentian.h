@@ -47,8 +47,8 @@
 
 /* ── 常量 ────────────────────────────────────────────────── */
 #define WENTIAN_VERSION    "1.0.0"
-#define WENTIAN_LAT        25.0820
-#define WENTIAN_LON        102.9097
+#define WENTIAN_LAT        25.09917
+#define WENTIAN_LON        102.92667
 #define WENTIAN_ALT        2115         /* 主人家海拔 (北斗校准) */
 #define WENTIAN_DB         "/root/data/wentian.db"
 #define WENTIAN_FUSION_DIR "/root/data/fusion"

@@ -48,7 +48,7 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
 
     char *body = wt_http_get(
         "https://api.open-meteo.com/v1/forecast?"
-        "latitude=25.08&longitude=102.91"
+        "latitude=25.09917&longitude=102.92667"
         "&current=temperature_2m,relative_humidity_2m,pressure_msl,"
         "weather_code,wind_speed_10m,wind_direction_10m,cloud_cover"
         "&timezone=auto", 10);
@@ -97,13 +97,16 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
     out->obs_time = time(NULL);
     strcpy(out->source, "openmeteo");
 
-    /* 构建原始METAR文本 (ECMWF模拟) */
-    snprintf(out->raw, sizeof(out->raw),
-        "METAR ZPPP %06dZ VRB02MPS %s %s %.0f Q%.0f",
-        (int)(out->obs_time % 86400 / 100),  /* HHMMSS */
-        "9999",  /* 能见度 */
-        "FEW026",  /* 云 */
-        out->temp, out->pressure_hpa);
+    /* 构建原始METAR文本 (ECMWF模拟) — 加SYNTHETIC前缀标记, 供打分脚本排除(禁止当实测) */
+    {
+        /* 正确HHMMSS: 用gmtime取UTC时/分/秒, 不是 %86400/100 */
+        struct tm *gt = gmtime(&out->obs_time);
+        char hhmmss[8];
+        snprintf(hhmmss, sizeof(hhmmss), "%02d%02d%02d", gt->tm_hour, gt->tm_min, gt->tm_sec);
+        snprintf(out->raw, sizeof(out->raw),
+            "SYNTHETIC ZPPP %sZ VRB02MPS %s %s %.0f Q%.0f",
+            hhmmss, "9999", "FEW026", out->temp, out->pressure_hpa);
+    }
 
     /* 天气码 → 文字 */
     if (weather_code >= 95)   strcat(out->raw, " TS");

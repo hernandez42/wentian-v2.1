@@ -145,21 +145,23 @@ static int load_gnss_features(time_t ts, int span_min, double *feat, int n) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
 
-    /* 读GNSS电离层数据 */
+    /* 读GNSS电离层数据 (local_ionosphere表, 由api_gnss_ion.c建) */
     sqlite3_stmt *st;
     int rc = sqlite3_prepare_v2(db,
         "SELECT s4_gps, s4_bds, gps_snr_avg, bds_snr_avg, "
-        "klob_vert_delay, total_sats, pdop "
-        "FROM local_iono ORDER BY ts DESC LIMIT 1", -1, &st, NULL);
+        "klob_vert_delay, samples_gps, samples_bds, pdop_avg "
+        "FROM local_ionosphere ORDER BY ts DESC LIMIT 1", -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
     if (sqlite3_step(st) == SQLITE_ROW) {
-        feat[1] = sqlite3_column_double(st, 0);
-        feat[2] = sqlite3_column_double(st, 1);
-        feat[3] = sqlite3_column_double(st, 2);
-        feat[4] = sqlite3_column_double(st, 3);
-        feat[5] = sqlite3_column_double(st, 4);
-        feat[6] = sqlite3_column_double(st, 5);
-        feat[7] = sqlite3_column_double(st, 6);
+        feat[1] = sqlite3_column_double(st, 0);  /* s4_gps */
+        feat[2] = sqlite3_column_double(st, 1);  /* s4_bds */
+        feat[3] = sqlite3_column_double(st, 2);  /* gps_snr_avg */
+        feat[4] = sqlite3_column_double(st, 3);  /* bds_snr_avg */
+        feat[5] = sqlite3_column_double(st, 4);  /* klob_vert_delay */
+        double sg = sqlite3_column_double(st, 5);  /* samples_gps */
+        double sb = sqlite3_column_double(st, 6);  /* samples_bds */
+        feat[6] = sg + sb;                          /* 总卫星数 */
+        feat[7] = sqlite3_column_double(st, 7);  /* pdop_avg */
     }
     sqlite3_finalize(st);
 
@@ -192,20 +194,25 @@ static int load_gnss_features(time_t ts, int span_min, double *feat, int n) {
 static int load_uno_features(time_t ts, int span_min, double *feat, int n) {
     (void)ts; (void)span_min; (void)n;
     sqlite3 *db;
-    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    /* ano_weather 表在主人硬件库, 不在 wentian.db */
+    if (sqlite3_open("/root/data/ano_weather.db", &db) != SQLITE_OK) return -1;
 
     sqlite3_stmt *st;
+    /* ts是TEXT(2026-09-07T17:17:08), 用strftime转unix; 列: t,h,p,pa */
     int rc = sqlite3_prepare_v2(db,
-        "SELECT t, h, p, pa, ts FROM ano_weather "
+        "SELECT t, h, p, pa, strftime('%s', ts) FROM ano_weather "
         "WHERE source='UNO_v2.0_bridge' ORDER BY ts DESC LIMIT 5", -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
 
     double temps[5] = {0}, pressures[5] = {0}, times[5] = {0};
+    double sea_press[5] = {0}, humids[5] = {0};
     int count = 0;
     while (sqlite3_step(st) == SQLITE_ROW && count < 5) {
-        temps[count] = sqlite3_column_double(st, 0);
-        pressures[count] = sqlite3_column_double(st, 2);
-        times[count] = sqlite3_column_double(st, 4);
+        temps[count]      = sqlite3_column_double(st, 0);  /* t */
+        humids[count]     = sqlite3_column_double(st, 1);  /* h */
+        pressures[count]  = sqlite3_column_double(st, 2);  /* p 站压 */
+        sea_press[count]  = sqlite3_column_double(st, 3);  /* pa 海压 */
+        times[count]      = sqlite3_column_double(st, 4);  /* strftime转unix */
         count++;
     }
     sqlite3_finalize(st);
@@ -213,12 +220,12 @@ static int load_uno_features(time_t ts, int span_min, double *feat, int n) {
 
     if (count == 0) return -1;
 
-    feat[0] = pressures[0];  /* 当前气压 */
+    feat[0] = pressures[0];  /* 当前站压 */
     feat[1] = temps[0];      /* 当前温度 */
-    feat[2] = 0;             /* 湿度(uno表无, 留空) */
-    feat[3] = 0;             /* 海平面气压(从其他源) */
+    feat[2] = humids[0];     /* 当前湿度 */
+    feat[3] = sea_press[0];  /* 当前海平面气压 */
 
-    /* 10分钟变化率(线性近似) */
+    /* 10分钟变化率(线性近似), times是真实unix时间戳 */
     if (count >= 2 && times[0] > times[count - 1]) {
         double dt = (times[0] - times[count - 1]) / 60.0;  /* 分钟 */
         if (dt > 0) {

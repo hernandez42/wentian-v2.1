@@ -69,7 +69,7 @@ def run():
  sl=sl%360
  nml=(sl-315+360)%360
  ti=max(0,min(23,int(nml/15)))
- out={'ts':ts,'time':n.strftime('%Y-%m-%d %H:%M:%S'),'location':'昆明长水机场(25.08°N,102.91°E)',
+ out={'ts':ts,'time':n.strftime('%Y-%m-%d %H:%M:%S'),'location':'昆明长水机场(25.09917°N,102.92667°E)',
       'solar_term':{'current':tm[ti],'index':ti},'sun':s,'moon':m,'planets':p,
       'celestial_assessment':ov,'anomalies':a,
       'scientific':{'temperature_c':round(t,1) if t else None,'kp_index':k,'s4':round(sv,3) if sv else None,'avg_gps_24h':g,'avg_bds_24h':b},

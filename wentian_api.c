@@ -55,7 +55,12 @@ static char *do_http(const char *method, const char *url, const char *body, int 
     wt_buf_t buf;
     wt_buf_init(&buf);
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
+    /* curl_global_init 只调一次 (libcurl要求程序生命周期仅一次) */
+    static int curl_initialized = 0;
+    if (!curl_initialized) {
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+        curl_initialized = 1;
+    }
     curl = curl_easy_init();
     if (!curl) { wt_buf_free(&buf); return NULL; }
 
@@ -71,8 +76,8 @@ static char *do_http(const char *method, const char *url, const char *body, int 
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&buf);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)timeout);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     curl_easy_setopt(curl, CURLOPT_TCP_FASTOPEN, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
@@ -97,7 +102,7 @@ static char *do_http(const char *method, const char *url, const char *body, int 
     }
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    curl_global_cleanup();
+    /* curl_global_cleanup 不再每次调用 (init也只调一次, 进程退出时由OS回收) */
 
     if (res != CURLE_OK) {
         wt_buf_free(&buf);

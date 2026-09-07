@@ -182,7 +182,8 @@ static int load_uno_pressure(int hours, double *p_series, int max_n) {
 
 /* ── 加载 Open-Meteo 当前室外 + 预测 ──────────────────────── */
 static int load_outdoor(double *T, double *H, /* P unused */ double *P, double *dew,
-                         double *cloud_3h, double *rain_prob_3h) {
+                         double *cloud_3h, double *rain_prob_3h,
+                         double *T1h, double *T3h, double *T6h) {
     sqlite3 *db;
     if (sqlite3_open(ANO_DB, &db) != SQLITE_OK) return -1;
     sqlite3_stmt *st;
@@ -228,6 +229,24 @@ static int load_outdoor(double *T, double *H, /* P unused */ double *P, double *
                         while (*p && (*p == ',' || *p == ' ')) p++;
                     }
                     if (cnt > 2) *rain_prob_3h = vals[2];
+                }
+            }
+            /* 温度预报: temp数组索引 1/3/6 = 1h/3h/6h 前预报 */
+            p = strstr(fj, "\"temp\":");
+            if (p) {
+                p += 7;
+                while (*p && *p != '[') p++;
+                if (*p == '[') {
+                    p++;
+                    double vals[24] = {0};
+                    int cnt = 0;
+                    while (*p && *p != ']' && cnt < 24) {
+                        vals[cnt++] = strtod(p, (char**)&p);
+                        while (*p && (*p == ',' || *p == ' ')) p++;
+                    }
+                    if (cnt > 1 && T1h) *T1h = vals[1];
+                    if (cnt > 3 && T3h) *T3h = vals[3];
+                    if (cnt > 6 && T6h) *T6h = vals[6];
                 }
             }
         }
@@ -376,19 +395,14 @@ static int wt_predict_compute(wt_predict_t *out) {
     /* 3. 加载 Open-Meteo 室外 */
     double cloud_3h = 0, rain_3h = 0;
     if (load_outdoor(&out->T_current, &out->H_current, NULL, NULL,
-                      &cloud_3h, &rain_3h)) {
+                      &cloud_3h, &rain_3h,
+                      &out->T_1h, &out->T_3h, &out->T_6h)) {
         /* Open-Meteo3h天气 */
         if (rain_3h > 70) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌧 大雨");
         else if (rain_3h > 30) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌦 小雨");
         else if (cloud_3h > 70) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "☁ 阴");
         else if (cloud_3h > 30) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌤 多云");
         else snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "☀ 晴");
-
-        /* 1h/3h/6h 温度预测 - 简化: 假设无变化趋势 (主人已弃用机柜温度) */
-        /* 真实场景需要 forecast_json.temp[] 索引, 简化处理 */
-        out->T_1h = out->T_current;
-        out->T_3h = out->T_current;
-        out->T_6h = out->T_current;
     }
 
     /* 4. METAR 解析 */
@@ -414,22 +428,52 @@ static int wt_predict_compute(wt_predict_t *out) {
                  out->zambretti_wx, sizeof(out->zambretti_wx),
                  &zambretti_conf);
 
-    /* 7. 投票融合天气 */
-    /* 每个源的票数 = 置信度 */
-    typedef struct { const char *wx; double vote; } vote_t;
-    /* votes unused */ (void)0; vote_t votes[3] = {
-        { out->zambretti_wx, zambretti_conf },
-        { out->openmeteo_3h[0] ? out->openmeteo_3h : NULL, 0.8 },
-        { out->metar_now[0] ? out->metar_now : NULL, 0.6 },
-    };
-    /* 简化投票: 直接用 Zambretti 优先 (因基于本地气压), 失败则 Open-Meteo */
-    if (out->zambretti_wx[0]) {
-        snprintf(out->final_weather, sizeof(out->final_weather), "%s", out->zambretti_wx);
-    } else if (out->openmeteo_3h[0]) {
-        snprintf(out->final_weather, sizeof(out->final_weather), "%s", out->openmeteo_3h);
-    } else {
-        snprintf(out->final_weather, sizeof(out->final_weather), "🌤 多云");
+    /* 7. 投票融合天气 — 真投票: 三源归一化到统一类别后加权投票 */
+    /* 归一化: 各源输出映射到 晴/多云/阴/雨/雷暴/雾 六类 */
+    typedef struct { const char *cat; double score; } cat_vote_t;
+
+    const char *cat_sunny  = "晴", *cat_cloudy = "多云", *cat_overcast = "阴";
+    const char *cat_rain   = "雨", *cat_thunder = "雷暴", *cat_fog = "雾";
+
+    /* 归一化单个源的天气文本 → 类别 */
+    cat_vote_t normalize(const char *wx, double conf) {
+        cat_vote_t cv = {NULL, 0};
+        if (!wx || !wx[0]) return cv;
+        if (strstr(wx, "雷") || strstr(wx, "Thunder") || strstr(wx, "TS")) cv.cat = cat_thunder;
+        else if (strstr(wx, "雨") || strstr(wx, "Rain") || strstr(wx, "RA")
+                 || strstr(wx, "阵雨") || strstr(wx, "shower")) cv.cat = cat_rain;
+        else if (strstr(wx, "雾") || strstr(wx, "Fog") || strstr(wx, "FG")
+                 || strstr(wx, "Mist") || strstr(wx, "BR")) cv.cat = cat_fog;
+        else if (strstr(wx, "阴") || strstr(wx, "Overcast")) cv.cat = cat_overcast;
+        else if (strstr(wx, "多云") || strstr(wx, "云") || strstr(wx, "Cloudy")) cv.cat = cat_cloudy;
+        else if (strstr(wx, "晴") || strstr(wx, "Clear") || strstr(wx, "sun")) cv.cat = cat_sunny;
+        else cv.cat = cat_cloudy;  /* 未知默认多云 */
+        cv.score = conf;
+        return cv;
     }
+
+    /* 三个源归一化 */
+    cat_vote_t srcs_v[3];
+    int nsv = 0;
+    cat_vote_t cv;
+    cv = normalize(out->zambretti_wx, zambretti_conf);
+    if (cv.cat) srcs_v[nsv++] = cv;
+    cv = normalize(out->openmeteo_3h, 0.8);
+    if (cv.cat) srcs_v[nsv++] = cv;
+    cv = normalize(out->metar_now, 0.6);
+    if (cv.cat) srcs_v[nsv++] = cv;
+
+    /* 按类别累加得分，取最高 */
+    const char *cats[] = {cat_sunny, cat_cloudy, cat_overcast, cat_rain, cat_thunder, cat_fog};
+    double cat_scores[6] = {0};
+    for (int i = 0; i < nsv; i++) {
+        for (int j = 0; j < 6; j++) {
+            if (strcmp(srcs_v[i].cat, cats[j]) == 0) { cat_scores[j] += srcs_v[i].score; break; }
+        }
+    }
+    int best = 0;
+    for (int j = 1; j < 6; j++) if (cat_scores[j] > cat_scores[best]) best = j;
+    snprintf(out->final_weather, sizeof(out->final_weather), "🌤 %s", cats[best]);
 
     /* 8. 风暴前兆 */
     out->storm_score = detect_storm_precursor(p_series, n_p,
@@ -475,10 +519,26 @@ static int wt_predict_compute(wt_predict_t *out) {
         out->alert_score += 1;
     }
 
-    /* 10. 等级 */
-    if (out->alert_score >= 8) snprintf(out->level, sizeof(out->level), "SEVERE");
-    else if (out->alert_score >= 5) snprintf(out->level, sizeof(out->level), "WARNING");
-    else if (out->alert_score >= 2) snprintf(out->level, sizeof(out->level), "WATCH");
+    /* 10. 等级 (阈值受自进化factor微调) */
+    /* 读取自进化系数, 闭环回传: factor<1收紧(降阈值→更敏感), >1放松 */
+    double evolve_factor = 1.0;
+    FILE *ef = fopen("/root/data/fusion/evolve_factor.json", "r");
+    if (ef) {
+        char ebuf[64] = {0};
+        if (fread(ebuf, 1, sizeof(ebuf)-1, ef) > 0) {
+            const char *fp = strstr(ebuf, "\"factor\":");
+            if (fp) evolve_factor = strtod(fp + 9, NULL);
+        }
+        fclose(ef);
+    }
+    if (evolve_factor <= 0 || evolve_factor > 2.0) evolve_factor = 1.0;
+    double th_1 = 8.0 * evolve_factor;
+    double th_2 = 5.0 * evolve_factor;
+    double th_3 = 2.0 * evolve_factor;
+
+    if (out->alert_score >= th_1) snprintf(out->level, sizeof(out->level), "SEVERE");
+    else if (out->alert_score >= th_2) snprintf(out->level, sizeof(out->level), "WARNING");
+    else if (out->alert_score >= th_3) snprintf(out->level, sizeof(out->level), "WATCH");
     else snprintf(out->level, sizeof(out->level), "NORMAL");
 
     return 0;

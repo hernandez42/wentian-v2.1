@@ -70,8 +70,8 @@ static void repair_sdr_gnss_scan(void) {
     pclose(fp);
 
     if (strstr(buf, "RTL2838") || strstr(buf, "R828D")) {
-        /* SDR 硬件在线, 触发北斗扫频 */
-        printf("  🔧 SDR硬件在线, 触发北斗扫频...\n");
+        /* SDR 硬件在线, 触发北斗+GPS扫频 */
+        printf("  🔧 SDR硬件在线, 触发北斗B1I+GPS L1扫频...\n");
         /* 北斗B1I (1561.098MHz) + GPS L1 (1575.42MHz) 扫频 */
         char cmd[1024];
         time_t now = time(NULL);
@@ -82,11 +82,11 @@ static void repair_sdr_gnss_scan(void) {
         mkdir(dirname, 0755);
 
         snprintf(cmd, sizeof(cmd),
-            "rtl_power -f 1569M:1581M:50k -g 40 -i 5 -1 "
-            "%s/gnss_l1_%02d%02d%02d.csv 2>&1 &",
+            "rtl_power -f 1559M:1581M:50k -g 40 -i 5 -1 "
+            "%s/gnss_b1i_l1_%02d%02d%02d.csv 2>&1 &",
             dirname, tm->tm_hour, tm->tm_min, tm->tm_sec);
         int ret = system(cmd);
-        (void)ret;
+        if (ret != 0) printf("  ⚠️ rtl_power 启动失败 rc=%d\n", ret);
     } else {
         printf("  ⚠️ SDR硬件离线, 跳过扫频\n");
     }
@@ -155,32 +155,60 @@ static int do_self_repair(char *log_out, int max_log) {
         /* ── 执行修复 ── */
         printf("  🔧 修复 %s: ", e->desc);
 
+        int repaired_ok = 0;
+
         /* 方式1: systemd 服务重启 */
         if (e->service && e->service[0]) {
             char cmd[256];
             snprintf(cmd, sizeof(cmd), "systemctl restart %s 2>&1", e->service);
             int rc = system(cmd);
             if (rc == 0) {
-                printf("重启 systemd %s 成功\n", e->service);
-                total_repaired++;
-            } else {
-                printf("重启 systemd %s 失败(rc=%d), 尝试脚本...\n", e->service, rc);
-                /* 方式2: 脚本直接启动 */
-                if (e->script && e->script[0]) {
-                    char sc[512];
-                    snprintf(sc, sizeof(sc), "nohup %s >> /var/log/repair_%s.log 2>&1 &",
-                             e->script, e->service);
-                    /* 不能用 nohup,直接启动 */
-                    snprintf(cmd, sizeof(cmd), "%s &", e->script);
-                    rc = system(cmd);
-                    if (rc == 0 || rc == 32512) {  /* 32512 = 后台返回的伪退出码 */
-                        printf("启动脚本 %s\n", e->script);
-                        total_repaired++;
-                    }
+                /* 等待服务拉起, 再验证是否真的 active */
+                sleep(10);
+                char vcmd[256];
+                snprintf(vcmd, sizeof(vcmd), "systemctl is-active %s 2>/dev/null", e->service);
+                FILE *vp = popen(vcmd, "r");
+                char vbuf[32] = {0};
+                if (vp) { fread(vbuf, 1, sizeof(vbuf)-1, vp); pclose(vp); }
+                if (strstr(vbuf, "active")) {
+                    printf("重启 %s 成功(已active)\n", e->service);
+                    repaired_ok = 1;
+                } else {
+                    printf("重启 %s 但未active(状态=%s), 尝试脚本...\n", e->service, vbuf);
                 }
+            } else {
+                printf("重启 %s 失败(rc=%d), 尝试脚本...\n", e->service, rc);
             }
-            /* 等待服务启动 */
-            sleep(2);
+        }
+
+        /* 方式2: 脚本直接启动 (service失败/未active时) */
+        if (!repaired_ok && e->script && e->script[0]) {
+            char cmd[512];
+            snprintf(cmd, sizeof(cmd), "%s >/dev/null 2>&1 &", e->script);
+            int rc = system(cmd);
+            /* 只认 rc==0, 32512(127<<8=命令未找到)绝不当成功 */
+            if (rc == 0) {
+                printf("启动脚本 %s\n", e->script);
+                repaired_ok = 1;
+            } else {
+                printf("脚本 %s 启动失败 rc=%d\n", e->script, rc);
+            }
+        }
+
+        /* 只有真正恢复才计数+写日志 */
+        if (repaired_ok) {
+            total_repaired++;
+            /* 写入修复日志(持久化, 不再只有printf) */
+            FILE *lf = fopen("/root/data/fusion/repair_log.txt", "a");
+            if (lf) {
+                time_t tnow = time(NULL);
+                struct tm *tmp = localtime(&tnow);
+                char tsbuf[32];
+                strftime(tsbuf, sizeof(tsbuf), "%Y-%m-%d %H:%M:%S", tmp);
+                fprintf(lf, "[%s] 修复 %s (service=%s script=%s)\n",
+                        tsbuf, e->desc, e->service ? e->service : "", e->script ? e->script : "");
+                fclose(lf);
+            }
         }
     }
 

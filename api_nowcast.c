@@ -112,7 +112,7 @@
     sqlite3_stmt *st;
     int rc = sqlite3_prepare_v2(db,
         "SELECT ts, pwv_mm FROM local_pwv "
-        "WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
+        "WHERE ts >= ? ORDER BY ts ASC LIMIT ?",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
     sqlite3_bind_int64(st, 1, (sqlite3_int64)cutoff);
@@ -127,7 +127,7 @@
     sqlite3_finalize(st);
     sqlite3_close(db);
 
-    /* 返回的数据是倒序(最新在前), 保持这样供nowcast使用 */
+    /* 返回的数据是升序(最早在前), 下游用pwv_vals[n-1]取最新值 */
     return n;
 }
 

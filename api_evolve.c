@@ -155,12 +155,13 @@ static int load_metar_obs(time_t target_ts, int window_sec,
     return found;
 }
 
-/* ── 评分: 预报 vs 实测 ──────────────────────────────────── */
+/* ── 评分: 预报 vs 实测 (支持1h/3h/6h offset) ──────────── */
 static int wt_evaluate_predictor(const char *predictor, int hours,
-                                 wt_evo_t *out) {
+                                 wt_evo_t *out, const char *target_label,
+                                 int offset_sec) {
     memset(out, 0, sizeof(*out));
     strcpy(out->predictor, predictor);
-    strcpy(out->target, "1h");
+    snprintf(out->target, sizeof(out->target), "%s", target_label);
     out->ts = time(NULL);
 
     /* 1. 取所有预报 */
@@ -182,7 +183,7 @@ static int wt_evaluate_predictor(const char *predictor, int hours,
     /* score_total unused */ int score_total = 0; (void)score_total;
 
     for (int i = 0; i < n_pred; i++) {
-        time_t target = ts_arr[i] + 3600;  /* 预报未来1h */
+        time_t target = ts_arr[i] + offset_sec;  /* 预报未来 offset_sec */
         double t_obs = NAN, p_obs = NAN;
         char wx_obs[32] = {0};
 
@@ -411,29 +412,38 @@ int wt_evo_run(void) {
     if (n_unhealthy > 0) {
         printf("  ⚠️ 自愈检查发现 %d 项异常:\n", n_unhealthy);
         printf("    %s\n", heal_alerts);
-        printf("  🔧 全系统自愈: 已重启 %d 个组件\n", restarted);
+        printf("  🔧 修复由全系统自愈引擎(wt_full_self_repair)执行\n");
     } else {
         printf("  ✅ 自愈检查: 全部数据表正常\n");
     }
 
-    /* 2. 评分闭环 */
-    wt_evo_t e1, e2;
-    int rc1 = wt_evaluate_predictor("multi_source", 24, &e1);
-    int rc2 = wt_evaluate_predictor("nowcast", 24, &e2);
-
-    if (rc1 == 0) {
-        wt_evo_save(&e1);
-        printf("  📊 multi_source 评分: %d/100 | 温度MAE=%.2f°C 气压MAE=%.2fhPa\n",
-               e1.total_score, e1.mae_temp, e1.mae_press);
-        printf("    %s\n", e1.note);
+    /* 2. 评分闭环 (1h/3h/6h) */
+    wt_evo_t e1, e2, e3, e4, e5, e6;
+    struct { wt_evo_t *e; const char *name; const char *label; int offset; } eval_jobs[] = {
+        {&e1, "multi_source", "1h",  3600},
+        {&e2, "multi_source", "3h", 10800},
+        {&e3, "multi_source", "6h", 21600},
+        {&e4, "nowcast",     "1h",  3600},
+        {&e5, "nowcast",     "3h", 10800},
+        {&e6, "nowcast",     "6h", 21600},
+    };
+    int eval_ok = 0;
+    for (int i = 0; i < 6; i++) {
+        int rc = wt_evaluate_predictor(eval_jobs[i].name, 24,
+                                       eval_jobs[i].e,
+                                       eval_jobs[i].label,
+                                       eval_jobs[i].offset);
+        if (rc == 0) {
+            wt_evo_save(eval_jobs[i].e);
+            printf("  📊 %s(%s) 评分: %d/100 | 温度MAE=%.2f°C 气压MAE=%.2fhPa\n",
+                   eval_jobs[i].name, eval_jobs[i].label,
+                   eval_jobs[i].e->total_score,
+                   eval_jobs[i].e->mae_temp, eval_jobs[i].e->mae_press);
+            printf("    %s\n", eval_jobs[i].e->note);
+            eval_ok++;
+        }
     }
-    if (rc2 == 0) {
-        wt_evo_save(&e2);
-        printf("  📊 nowcast 评分: %d/100 | 温度MAE=%.2f°C 气压MAE=%.2fhPa\n",
-               e2.total_score, e2.mae_temp, e2.mae_press);
-        printf("    %s\n", e2.note);
-    }
-    if (rc1 != 0 && rc2 != 0) {
+    if (eval_ok == 0) {
         printf("  ⚠️ 评分闭环: 预报样本不足(需积累更多历史预报)\n");
     }
 
@@ -441,6 +451,12 @@ int wt_evo_run(void) {
     double factor = 1.0;
     wt_self_evolve_adjust(&factor);
     printf("  🎯 自完善: 阈值系数=%.3f (1.0=不变, <1=收紧, >1=放松)\n", factor);
+    /* 持久化 factor 供 api_predict.c 读取回传, 闭环闭合 */
+    FILE *ff = fopen("/root/data/fusion/evolve_factor.json", "w");
+    if (ff) {
+        fprintf(ff, "{\"factor\": %.4f, \"ts\": %ld}\n", factor, (long)time(NULL));
+        fclose(ff);
+    }
 
     /* 4. 自我修复 — 若发现异常, 触发重试 */
     if (n_unhealthy > 0) {
