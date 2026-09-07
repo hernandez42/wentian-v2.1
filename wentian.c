@@ -50,8 +50,21 @@ static int g_kf_inited = 0;
 
 static void kf_init_once(void) {
     if (g_kf_inited) return;
-    wt_kf_init(&g_kf_pressure, 1013.25, 0.01, 0.5);   /* 气压: 低q低r */
-    wt_kf_init(&g_kf_temp, 20.0, 0.05, 0.3);           /* 温度 */
+    /* 从DB读上一条融合气压作初始值, 不硬编码1013.25 */
+    double last_p = 1013.0;  /* 兜底值 */
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) == SQLITE_OK) {
+        sqlite3_stmt *st;
+        if (sqlite3_prepare_v2(db, "SELECT fused, sigma FROM kf_pressure ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK) {
+            if (sqlite3_step(st) == SQLITE_ROW) {
+                last_p = sqlite3_column_double(st, 0);
+            }
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(db);
+    }
+    wt_kf_init(&g_kf_pressure, last_p, 0.01, 0.5);
+    wt_kf_init(&g_kf_temp, 20.0, 0.05, 0.3);
     g_kf_inited = 1;
 }
 

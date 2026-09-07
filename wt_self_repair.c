@@ -44,7 +44,7 @@ static const repair_entry_t REPAIR_TABLE[] = {
     {"gps_log",          "gps-collect",        "/root/scripts/gps_collect",               600,  50,  "GPS C版采集"},
     {"gps_log",          "gps-uno-fusion",     "/root/scripts/gps_uno_fusion.py",         600,  50,  "GPS-UNO融合"},
     {"ano_weather",      "uno-weather",        "/root/scripts/uno_bridge.py --loop --interval 60", 300, 100, "UNO气象(旧版)"},
-    {"outdoor",          "weather-station",    "/root/scripts/weather_station_v2",        2100,  3,  "室外气象站(C)"},
+    {"outdoor",          "wentian",            "",                                3600,  10,  "室外气象(问天daemon)"},
     {"metar",            "weather-analyze",    "/root/scripts/weather_analyze.py",        7200,  3,  "METAR机场数据"},
     {"nowcast",          "wentian",            "",                                      600,   5,  "短临Nowcast(问天)"},
     {"local_pwv",        "wentian",            "",                                      900,   5,  "PWV反演(问天)"},
