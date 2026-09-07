@@ -13,7 +13,7 @@
  * 5 数据源融合 (C/N0/S4):
  *   源1 (S1): UNO本地气象  (气压突变→电离层间接指示)
  *   源2 (S2): ATGM336H GPS+北斗串口 SNR (室内, 主路)
- *   源3 (S3): SDR扫频 GPS-L1/BDS-B1I 信号功率 (室外视角)
+ *   源3 (S3): SDR扫频(暂未接入)/BDS-B1I 信号功率 (室外视角)
  *   源4 (S4): Open-Meteo 卫星气象(电离层TEC间接)
  *   源5 (S5): ScintPi互联网S4公开数据 (朱涛 BG8SBA对标)
  *
@@ -57,104 +57,11 @@ static const char *s4_level_class(double s4) {
     return "SEVERE";
 }
 
-/* ── 源3: SDR扫频 GPS-L1 + BDS-B1I S4 提取 ───────────────── */
+/* ── 源3: SDR扫频(暂未接入) + BDS-B1I S4 提取 ───────────────── */
 /* 原理: RTL-SDR接收GPS L1 (1575.42MHz) / BDS B1I (1561.098MHz)
  *       扫频CSV峰值变化反映信号功率波动 → 推算 S4
  * 主人硬件限制: 扫频数据来自gnss_sweep_v2/, 每次扫频多bin
  * 取所有扫频的SNR>3dB峰, 算峰间峰内RSD作为S4_t */
-static double multisrc_sdr_s4(double *out_peak_snr, double *out_peak_freq_mhz) {
-    (void)out_peak_snr; (void)out_peak_freq_mhz;
-    struct stat st; (void)st;
-    int found = 0; (void)found;
-
-    /* 优先读 GPS-L1 扫频 */
-    FILE *fp = fopen("/root/data/sdr/gnss_sweep_v2/GPS-L1.csv", "r");
-    if (!fp) fp = fopen("/root/data/sdr/gnss_sweep_v2/BDS-B1I.csv", "r");
-    if (!fp) return -1.0;
-
-    /* 收集所有扫频峰值 */
-    double peak_snrs[20] = {0};
-    double peak_freqs[20] = {0};
-    int n_peaks = 0;
-
-    char line[8192];
-    while (fgets(line, sizeof(line), fp)) {
-        char *parts[600];
-        int n = 0;
-        char *p = line;
-        while (p && *p && n < 600) {
-            parts[n++] = p;
-            char *q = strchr(p, ',');
-            if (!q) break;
-            *q = '\0';
-            p = q + 1;
-        }
-        if (n < 7) continue;
-
-        double start_hz = 0, bin_hz = 0;
-        int num_bins = 0;
-        if (sscanf(parts[2], "%lf", &start_hz) != 1) continue;
-        if (sscanf(parts[4], "%lf", &bin_hz) != 1) continue;
-        if (sscanf(parts[5], "%d", &num_bins) != 1) continue;
-        if (num_bins <= 0 || num_bins > 500 || bin_hz <= 0) continue;
-
-        /* 解析dBm数组 */
-        double bins[500] = {0};
-        int valid = 0;
-        for (int i = 6; i < n && valid < num_bins; i++) {
-            if (sscanf(parts[i], "%lf", &bins[valid]) == 1) valid++;
-        }
-        if (valid < 10) continue;
-
-        /* 找峰值 */
-        int peak_idx = 0;
-        double peak_dbm = -200;
-        double sum_dbm = 0;
-        for (int i = 0; i < valid; i++) {
-            sum_dbm += bins[i];
-            if (bins[i] > peak_dbm) { peak_dbm = bins[i]; peak_idx = i; }
-        }
-        double noise = sum_dbm / valid;
-        double snr = peak_dbm - noise;
-        double freq = (start_hz + peak_idx * bin_hz) / 1e6;
-
-        if (snr > 1.5 && n_peaks < 20) {
-            peak_snrs[n_peaks] = snr;
-            peak_freqs[n_peaks] = freq;
-            n_peaks++;
-        }
-    }
-    fclose(fp);
-
-    if (n_peaks < 2) {
-        /* 只有一次扫频 → 直接输出那次SNR作为初步估计 */
-        if (out_peak_snr) *out_peak_snr = n_peaks > 0 ? peak_snrs[0] : 0;
-        if (out_peak_freq_mhz) *out_peak_freq_mhz = n_peaks > 0 ? peak_freqs[0] : 0;
-        return n_peaks > 0 ? 0.3 * (peak_snrs[0] / 20.0) : -1.0;  /* 粗估 */
-    }
-
-    /* 多扫频: 峰SNR的RSD作为S4_t
-     * S4 = stddev(peak_snrs) / mean(peak_snrs) */
-    double sum = 0, sum_sq = 0;
-    for (int i = 0; i < n_peaks; i++) {
-        sum += peak_snrs[i];
-        sum_sq += peak_snrs[i] * peak_snrs[i];
-    }
-    double mean = sum / n_peaks;
-    double var = sum_sq / n_peaks - mean * mean;
-    if (var < 0) var = 0;
-    double s4 = sqrt(var) / mean;
-
-    /* 取最强峰 */
-    int best = 0;
-    for (int i = 1; i < n_peaks; i++) {
-        if (peak_snrs[i] > peak_snrs[best]) best = i;
-    }
-
-    if (out_peak_snr) *out_peak_snr = peak_snrs[best];
-    if (out_peak_freq_mhz) *out_peak_freq_mhz = peak_freqs[best];
-    return s4;
-}
 
 /* ── 源2: ATGM336H 串口 GPS/BDS SNR (从已有 local_iono) ─────── */
 static double multisrc_gnss_uart_s4(double *out_avg_snr) {
@@ -348,11 +255,11 @@ int wt_multisrc_run(void) {
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", -1, &st, NULL);
         if (rc == SQLITE_OK) {
             sqlite3_bind_int64(st, 1, (sqlite3_int64)time(NULL));
-            sqlite3_bind_double(st, 2, s4_sdr);
+            sqlite3_bind_double(st, 2, -1.0);  /* SDR暂未接入 */
             sqlite3_bind_double(st, 3, s4_uart);
             sqlite3_bind_double(st, 4, s4_openmeteo);
             sqlite3_bind_double(st, 5, s4_uno);
-            sqlite3_bind_double(st, 6, s4_scintpi);
+            sqlite3_bind_double(st, 6, -1.0);  /* ScintPi暂未接入 */
             sqlite3_bind_double(st, 7, fused_s4);
             sqlite3_bind_double(st, 8, confidence);
             sqlite3_bind_text(st, 9, s4_level_class(fused_s4), -1, SQLITE_TRANSIENT);
@@ -375,12 +282,11 @@ int wt_multisrc_run(void) {
         fprintf(jf, "{\n");
         fprintf(jf, "  \"ts\": %ld,\n", (long)time(NULL));
         fprintf(jf, "  \"sources\": {\n");
-        fprintf(jf, "    \"sdr\": {\"s4\": %.4f, \"peak_snr_db\": %.2f, \"peak_freq_mhz\": %.3f},\n",
-                s4_sdr, sdr_peak_snr, sdr_peak_freq);
+        fprintf(jf, "    \"sdr\": {\"s4\": -1.0, \"note\": \"暂未接入\"},\n");
         fprintf(jf, "    \"uart\": {\"s4\": %.4f, \"avg_snr_db\": %.1f},\n", s4_uart, uart_avg_snr);
         fprintf(jf, "    \"openmeteo\": {\"kp\": %.1f, \"s4_eq\": %.4f},\n", kp, s4_openmeteo);
         fprintf(jf, "    \"uno\": {\"dp_30min_hpa\": %.2f, \"s4_eq\": %.4f},\n", dp_30min, s4_uno);
-        fprintf(jf, "    \"scintpi\": {\"s4\": %.4f}\n", s4_scintpi);
+        fprintf(jf, "    \"scintpi\": {\"s4\": -1.0, \"note\": \"暂未接入\"}\n");
         fprintf(jf, "  },\n");
         fprintf(jf, "  \"fusion\": {\n");
         fprintf(jf, "    \"fused_s4\": %.4f,\n", fused_s4);
