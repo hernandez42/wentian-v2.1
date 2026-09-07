@@ -178,13 +178,17 @@ double wt_dm_to_decimal(double dm, char dir) {
 }
 
 /* ── 辅助: 十进制度转度分秒 ─────────────────────────── */
-void wt_decimal_to_dms(double dec, char *dir_out, int *d, int *m, double *s) {
+void wt_decimal_to_dms(double dec, int is_lon, int *d, int *m, double *s, char *dir_out) {
     int sign = (dec < 0) ? -1 : 1;
     double a = fabs(dec);
     *d = (int)a;
     double rem = (a - *d) * 60.0;
     *m = (int)rem;
     *s = (rem - *m) * 60.0;
-    if (sign < 0 && *d == 0 && *m == 0 && *s == 0) *dir_out = 'N';
-    else if (dir_out) *dir_out = (dec >= 0) ? ((dir_out && *dir_out=='L')?'E':'N') : ((dir_out && *dir_out=='L')?'W':'S');
+    if (dir_out) {
+        if (dec >= 0)
+            *dir_out = is_lon ? 'E' : 'N';
+        else
+            *dir_out = is_lon ? 'W' : 'S';
+    }
 }

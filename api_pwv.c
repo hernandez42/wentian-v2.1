@@ -178,7 +178,8 @@ int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
 
     /* 3. 海平面气压 → 测站气压(用GPS海拔) */
     double p_station = p_sea - (alt * PWV_PRESSURE_GRAD);
-    if (p_station < 600 || p_station > 1100) p_station = p_sea;
+    /* 站压合理范围(~800hPa@2103m): 700-1050 兜底 */
+    if (p_station < 700 || p_station > 1050) p_station = p_sea - 252;
     out->press_hpa = p_station;
 
     /* 4. Saastamoinen模型(天顶角60°=典型值) */

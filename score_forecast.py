@@ -114,7 +114,7 @@ def get_metar_near(ts_target: int, window: int = 1800) -> dict:
         # — 温度/海压为0的行按字段剔除(NULLIF)
         cur.execute(
             "SELECT ts, NULLIF(temp,0.0), dewpoint, NULLIF(altim,0.0), raw "
-            "FROM metar WHERE icao='ZPPP' AND ts >= ? AND ts <= ? "
+            "FROM metar WHERE icao='ZPPP' AND raw NOT LIKE 'SYNTHETIC%' AND ts >= ? AND ts <= ? "
             "AND temp != 0.0 AND altim != 0.0 "
             "ORDER BY ABS(ts - ?) LIMIT 1",
             (ts_target - window, ts_target + window, ts_target)
@@ -338,7 +338,7 @@ def _eval_alerts(db):
     try:
         conn = sqlite3.connect(WENTIAN_DB)
         cur = conn.cursor()
-        cur.execute("SELECT ts FROM metar WHERE icao='ZPPP' AND raw LIKE '%TSRA%' ORDER BY ts")
+        cur.execute("SELECT ts FROM metar WHERE icao='ZPPP' AND raw LIKE '%TSRA%' AND raw NOT LIKE 'SYNTHETIC%' ORDER BY ts")
         tsra_rows = cur.fetchall()
         conn.close()
     except:
@@ -466,8 +466,8 @@ def _send_feishu(msg):
             print('⚠ 无FEISHU密钥')
             return
         ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
         req = urllib.request.Request(
             'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
             data=json.dumps({'app_id':'cli_aae86c7e07235bed','app_secret':secret}).encode(),

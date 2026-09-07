@@ -205,7 +205,7 @@ char *wt_json_dup_arr(const char *json, const char *key, int idx) {
     }
     size_t len = p - start;
     char *out = malloc(len + 1);
-    if (!out) return NULL;
+    if (!out || len == 0) { free(out); return NULL; }
     memcpy(out, start, len);
     out[len] = '\0';
     /* 修剪首尾空白 */

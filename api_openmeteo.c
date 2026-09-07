@@ -186,8 +186,12 @@ int wt_openmeteo_climate(int month, int day, double *temp_mean) {
         WENTIAN_LAT, WENTIAN_LON, start_str, end_str);
     char *json = wt_http_get(url, 10);
     if (!json) return -1;
-    /* 取月平均 */
-    if (temp_mean) *temp_mean = wt_json_num(json, "temperature_2m_mean", NAN);
+    /* climate API返回daily.{}数组, 非顶层字段 */
+    const char *daily = strstr(json, "\"daily\":");
+    if (!daily) { free(json); return -1; }
+    daily = strchr(daily, '{');
+    if (!daily) { free(json); return -1; }
+    if (temp_mean) *temp_mean = wt_json_num(daily, "temperature_2m_mean", NAN);
     free(json);
     return 0;
 }
