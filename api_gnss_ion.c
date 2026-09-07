@@ -117,19 +117,20 @@ static double calc_s4_robust_low_snr(const double *snr_db, int n,
 static int load_gnss_snr(double *gps_snrs, int gps_max,
                          double *bds_snrs, int bds_max,
                          double *pdops, int pdop_max,
-                         /* unused */ int lookback_min) {
+                         int lookback_min) {
     sqlite3 *db;
-    /* 从原始gps_log表读SNR, 该表由api_local.c持续写入
-     * gps_log的ts是ISO格式(如2026-09-04T09:22:08), 用strftime统一比较 */
+    if (lookback_min <= 0) lookback_min = 15;  /* 默认15分钟 */
     if (sqlite3_open(OWNER_DB, &db) != SQLITE_OK) return 0;
 
     sqlite3_stmt *st;
-    /* 用strftime('%Y-%m-%dT%H:%M', ts)提取分钟精度, 与datetime('now')比较 */
-    int rc = sqlite3_prepare_v2(db,
+    /* 用printf插lookback_min (不是strftime %d!), ts是ISO文本与datetime比较 */
+    char sql[256];
+    snprintf(sql, sizeof(sql),
         "SELECT gps_snr_avg,bds_snr_avg,pdop FROM gps_log "
-        "WHERE strftime('%s', ts) >= strftime('-%d seconds', 'now') "
-        "AND gps_snr_avg > 0 ORDER BY ts DESC LIMIT 64",
-        -1, &st, NULL);
+        "WHERE ts >= datetime('now', '-%d minutes') "
+        "AND gps_snr_avg > 0 ORDER BY ts DESC LIMIT %d",
+        lookback_min, gps_max > bds_max ? gps_max : 64);
+    int rc = sqlite3_prepare_v2(db, sql, -1, &st, NULL);
     if (rc != SQLITE_OK) { fprintf(stderr, "SQL prepare fail rc=%d\n", rc); sqlite3_close(db); return 0; }
 
     int ng = 0, nb = 0, np = 0;

@@ -234,9 +234,21 @@ int wt_nasa_donki_list(wt_donki_type_t type, wt_donki_event_t *out, int max) {
 
     int count = 0;
     const char *p = json;
-    while (count < max && (p = strchr(p, '{'))) {
+    /* 跳过外层数组括号 '[' */
+    p = strchr(p, '[');
+    if (!p) { free(json); return -1; }
+    p++;
+
+    while (count < max) {
+        /* 找下一个顶层事件 '{' (dup_obj自动跳过嵌套对象) */
+        p = strchr(p, '{');
+        if (!p) break;
         char *blk = dup_obj(p);
         if (!blk) { p++; continue; }
+
+        /* 跳过这个完整事件 (到匹配的 '}' 之后) */
+        p = strchr(p, '}');
+        if (p) p++;
 
         wt_donki_event_t *e = &out[count];
         memset(e, 0, sizeof(*e));

@@ -167,14 +167,23 @@ int wt_openmeteo_flood(double *discharge, double *level) {
 
 /* Open-Meteo Climate (CMIP6 30年气候预测) */
 int wt_openmeteo_climate(int month, int day, double *temp_mean) {
-    (void)month; (void)day;  /* 当前用start_date/end_date范围 */
+    (void)month; (void)day;
     char url[1024];
+    /* 动态生成过去1年日期, 不写死 */
+    time_t now_t = time(NULL);
+    struct tm *now = localtime(&now_t);
+    struct tm start = *now, end = *now;
+    start.tm_year -= 1;  /* 一年前 */
+    mktime(&start);
+    char start_str[12], end_str[12];
+    snprintf(start_str, sizeof(start_str), "%04d-%02d-%02d", start.tm_year+1900, start.tm_mon+1, start.tm_mday);
+    snprintf(end_str, sizeof(end_str), "%04d-%02d-%02d", end.tm_year+1900, end.tm_mon+1, end.tm_mday);
     snprintf(url, sizeof(url),
         "https://climate-api.open-meteo.com/v1/climate?"
         "latitude=%.4f&longitude=%.4f"
-        "&start_date=2025-09-01&end_date=2026-09-01"
+        "&start_date=%s&end_date=%s"
         "&models=CMCC_CM2_VHR4&daily=temperature_2m_mean",
-        WENTIAN_LAT, WENTIAN_LON);
+        WENTIAN_LAT, WENTIAN_LON, start_str, end_str);
     char *json = wt_http_get(url, 10);
     if (!json) return -1;
     /* 取月平均 */

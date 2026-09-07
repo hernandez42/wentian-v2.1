@@ -79,8 +79,8 @@ def send_feishu(msg: str) -> bool:
 
         import urllib.request, ssl
         ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
 
         req = urllib.request.Request(
             'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
