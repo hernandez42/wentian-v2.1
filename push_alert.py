@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 NOWCAST_JSON = '/root/data/fusion/nowcast.json'
 CORREL_JSON = '/root/data/fusion/radar_correlation.json'
 ALERT_STATE = '/root/data/fusion/alert_state.json'
-FEISHU_USER = 'ou_52a5a07c6c4c825ccb530efe5befcc77'
+FEISHU_USER = os.environ.get('FEISHU_USER_ID', 'ou_52a5a07c6c4c825ccb530efe5befcc77')
 
 # ── Mac风格图标 ────────────────────────────────────────────
 ICONS = {
@@ -84,7 +84,7 @@ def send_feishu(msg: str) -> bool:
 
         req = urllib.request.Request(
             'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-            data=json.dumps({'app_id':'cli_aae86c7e07235bed','app_secret':secret}).encode(),
+            data=json.dumps({'app_id':os.environ.get('FEISHU_APP_ID','cli_aae86c7e07235bed'),'app_secret':secret}).encode(),
             headers={'Content-Type':'application/json'}
         )
         with urllib.request.urlopen(req, timeout=10, context=ctx) as r:

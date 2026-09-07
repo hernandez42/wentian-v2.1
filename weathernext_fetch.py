@@ -16,7 +16,7 @@ OUT_DIR = '/root/data/fusion'
 LAT, LON = 25.09917, 102.92667  # 长水机场真坐标
 
 def _ctx():
-    c = ssl.create_default_context(); c.check_hostname = False; c.verify_mode = ssl.CERT_NONE
+    c = ssl.create_default_context(); c.check_hostname = True; c.verify_mode = ssl.CERT_REQUIRED
     return c
 
 def fetch():

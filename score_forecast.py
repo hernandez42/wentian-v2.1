@@ -470,14 +470,14 @@ def _send_feishu(msg):
         ctx.verify_mode = ssl.CERT_REQUIRED
         req = urllib.request.Request(
             'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
-            data=json.dumps({'app_id':'cli_aae86c7e07235bed','app_secret':secret}).encode(),
+            data=json.dumps({'app_id':os.environ.get('FEISHU_APP_ID','cli_aae86c7e07235bed'),'app_secret':secret}).encode(),
             headers={'Content-Type':'application/json'}
         )
         with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
             token = json.loads(r.read()).get('tenant_access_token', '')
         if token:
             payload = json.dumps({
-                'receive_id': 'ou_52a5a07c6c4c825ccb530efe5befcc77',
+                'receive_id': os.environ.get('FEISHU_USER_ID','ou_52a5a07c6c4c825ccb530efe5befcc77'),
                 'msg_type': 'text',
                 'content': json.dumps({'text': msg})
             }).encode()
