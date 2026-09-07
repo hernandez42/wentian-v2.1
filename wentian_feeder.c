@@ -540,7 +540,7 @@ static int export_one(sqlite3 *db, FILE *out) {
             write_kv_int(out, "hours", wn > 100 ? 360 : 0, 0);
         }
     }
-    write_kv_esc(out, "model", "google_weathernext2_ensemble", 1);
+    write_kv_esc(out, "model", "google_weathernext2+graphcast", 1);
     fprintf(out, "    },\n");  /* weathernext, 后面还有tec_realtime */
 
     /* 27b. 真实TEC (IGS WHU GIM, 替代硬编码Klobuchar) */
@@ -580,7 +580,7 @@ static int export_one(sqlite3 *db, FILE *out) {
 
     fprintf(out, "  },\n");  /* data 块结束 */
     fprintf(out, "  \"meta\": {\n");
-    fprintf(out, "    \"data_source_count\": \"17 API + 4 硬件 + 1 Kalman + 1 PWV + 1 电离层 + 1 相干 + 1 预测 + 1 自进化 + 1 多源S4 + 4 开源 + 1 自愈 + 1 TEC + 1 钦天监 + 1 ROTI + 1 星象 + 1 WeatherNext = 38 维度\",\n");
+    fprintf(out, "    \"data_source_count\": \"Google 2源 + 17API + 4硬件 + 1 Kalman + ... = 39 维度\",\n");
     fprintf(out, "    \"db_path\": \"/root/data/wentian.db\",\n");
     fprintf(out, "    \"schema\": \"18 tables + imperial_enhancement + roti.json\"\n");
     fprintf(out, "  }\n");

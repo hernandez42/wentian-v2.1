@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-WeatherNext 集成 v1.0 — Google DeepMind × 问天
-===========================================
-读取 Open-Meteo WeatherNext 2 Ensemble (64成员, 15天, 6小时间隔)
-融合到问天预测引擎
+WeatherNext + GraphCast v1.1 — Google DeepMind × 问天
+====================================================
+主模型: Google WeatherNext 2 Ensemble (64成员, 15天, 6小时间隔)
+辅助模型: Google GraphCast (高分辨率)
+回退: Open-Meteo 标准模型
 
-API: ensemble-api.open-meteo.com/v1/ensemble?models=google_weathernext2_ensemble
+API: ensemble-api.open-meteo.com/v1/ensemble?models=google_weathernext2_ensemble,google_graphcast
 输出: /root/data/fusion/weathernext_forecast.json
 """
 import json, os, sqlite3, time
