@@ -181,7 +181,7 @@ static int load_uno_pressure(int hours, double *p_series, int max_n) {
 }
 
 /* ── 加载 Open-Meteo 当前室外 + 预测 ──────────────────────── */
-static int load_outdoor(double *T, double *H, /* P unused */ double *P, double *dew,
+static int load_outdoor(double *T, double *H, double *P_unused, double *dew,
                          double *cloud_3h, double *rain_prob_3h,
                          double *T1h, double *T3h, double *T6h) {
     sqlite3 *db;

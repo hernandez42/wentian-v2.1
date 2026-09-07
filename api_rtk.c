@@ -179,7 +179,6 @@ double wt_dm_to_decimal(double dm, char dir) {
 
 /* ── 辅助: 十进制度转度分秒 ─────────────────────────── */
 void wt_decimal_to_dms(double dec, int is_lon, int *d, int *m, double *s, char *dir_out) {
-    int sign = (dec < 0) ? -1 : 1;
     double a = fabs(dec);
     *d = (int)a;
     double rem = (a - *d) * 60.0;

@@ -65,7 +65,7 @@ static void repair_sdr_gnss_scan(void) {
     FILE *fp = popen("timeout 3 rtl_sdr -f 1575.42M -g 40 -n 8192 /tmp/sdr_health_check.bin 2>&1 | head -2", "r");
     if (!fp) return;
     char buf[256] = {0};
-    fread(buf, 1, 255, fp);
+    (void)fread(buf, 1, 255, fp);
     (void)buf;
     pclose(fp);
 
@@ -124,7 +124,7 @@ static int do_self_repair(char *log_out, int max_log) {
             } else if (strcmp(e->table, "passage") == 0) {
                 snprintf(q, sizeof(q),
                     "SELECT COUNT(*), strftime('%%s','now') - MAX(ts) FROM "
-                    "(SELECT MAX(ts) as ts FROM nowcast)", 1);
+                    "(SELECT MAX(ts) as ts FROM nowcast)");
                 /* passage 没有独立表, 用 nowcast 代替 */
             } else {
                 snprintf(q, sizeof(q),
@@ -169,7 +169,7 @@ static int do_self_repair(char *log_out, int max_log) {
                 snprintf(vcmd, sizeof(vcmd), "systemctl is-active %s 2>/dev/null", e->service);
                 FILE *vp = popen(vcmd, "r");
                 char vbuf[32] = {0};
-                if (vp) { fread(vbuf, 1, sizeof(vbuf)-1, vp); pclose(vp); }
+                if (vp) { (void)fread(vbuf, 1, sizeof(vbuf)-1, vp); pclose(vp); }
                 if (strstr(vbuf, "active")) {
                     printf("重启 %s 成功(已active)\n", e->service);
                     repaired_ok = 1;

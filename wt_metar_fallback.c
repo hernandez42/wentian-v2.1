@@ -124,23 +124,8 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
 
 /* ── 源B: OGIMET 法国网站抓取 ────────────────────────── */
 static int fetch_ogimet_metar(wt_metar_fallback_t *out) {
-    memset(out, 0, sizeof(*out));
-    strcpy(out->icao, "ZPPP");
-
-    char *body = wt_http_get(
-        "https://www.ogimet.com/display_synops2.php?lang=en"
-        "&lugar=ZPPP&tipo=ALL&ord=REV&nil=SI&fmt=txt", 10);
-    if (!body) return -1;
-
-    /* 从 HTML 里提取 METAR: 找 "ZPPP" 后面的原始文本
-     * OGIMET 返回 HTML, 但有 PRE 格式 */
-    const char *p = strstr(body, "TTAA");
-    if (!p) { free(body); return -1; }
-
-    /* TTAA 后面跟着原始 synop 编码, 非标准METAR格式 */
-    /* 这个源太复杂, 降级 */
-    free(body);
-    return -1;
+    (void)out;
+    return -1;  /* OGIMET降级, 不再使用 */
 }
 
 /* ── 源C: NWS tgftp 原始TXT ────────────────────────────── */
@@ -219,7 +204,7 @@ static int fetch_nws_tgftp(wt_metar_fallback_t *out) {
     char date_str[20] = {0};
     sscanf(body, "%19[^\n]", date_str);
     if (date_str[0]) {
-        int y = 0, m = 0, d = 0, hh = 0, mm = 0, ss = 0;
+        int y = 0, m = 0, d = 0, hh = 0, mm = 0;
         sscanf(date_str, "%d/%d/%d %d:%d", &y, &m, &d, &hh, &mm);
         struct tm tm_obs = {0};
         tm_obs.tm_year = y - 1900;
