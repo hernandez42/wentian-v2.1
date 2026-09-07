@@ -47,6 +47,7 @@ static const char *wmo_text(int code) {
 /* Open-Meteo Forecast - 当前室外气象权威 */
 int wt_openmeteo_current(wt_outdoor_t *out) {
     memset(out, 0, sizeof(*out));
+    out->fetched_at = time(NULL);
     char url[1024];
     snprintf(url, sizeof(url),
         "https://api.open-meteo.com/v1/forecast?"
