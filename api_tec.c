@@ -1,28 +1,23 @@
 /* ============================================================
- * api_tec.c - 等效 TEC 计算引擎 v1.0
+ * api_tec.c - 等效 TEC 估算引擎 v2.0
  * ============================================================
  * 项目: 问天 v2.3 (WenTian Weather Station)
  * 所有者: 主人朱涛 BG8SBA, 昆明长水机场
  *
- * 主人要求: TEC 计算 — 用多源数据推算电离层总电子含量
+ * 诚实声明: 问天是单频GPS, 无法做双频差分TEC
+ * 以下TEC数据均为经验估算, 非真实测量
+ * 详见 WENTIAN-NOTICE.md "数据局限性"
  *
- * 实际硬件限制:
- *   ATGM336H 是单频 GPS+北斗, 无 L1/L2 双频
- *   无法做传统的双频差分 TEC (P2-P1)
+ * 估算方法:
+ *   1. Kp → TEC: 经验公式 TEC = (Kp + 1) * 5 TECU
+ *      物理依据: Kp反映地磁活动 → 影响电离层电子密度
+ *      局限: 粗略线性, 未考虑纬度/季节/地方时
+ *   2. S4 → TEC: 关联性存在(TEC高时闪烁强), 但非定量
+ *      暂不启用, 仅作参考
+ *   3. F10.7 → TEC: 太阳射电通量→EUV电离率
+ *      TEC = F10.7 * 0.1 TECU (经验估算)
  *
- * 替代方案 (等效 TEC):
- *   1. Kp → TEC 经验模型:
- *      TEC_eq = (Kp + 1) * 5  (TECU)
- *      平静: Kp≤1 → TEC≈10 TECU
- *      活跃: Kp≥5 → TEC≥30 TECU
- *   2. S4 → TEC 关联:
- *      TEC = S4 * 100  (经验: 10%闪烁 ≈ 10 TECU)
- *   3. 太阳能 F10.7 → TEC:
- *      TEC = F10.7 * 0.1  (100 sfu → 10 TECU)
- *
- * 多源融合:
- *   权重: NOAA Kp(0.5) + S4(0.3) + F10.7(0.2)
- *   输出: TEC_multi, unit: TECU
+ * 输出: /root/data/fusion/tec_multi.json
  * ============================================================ */
 #include "wentian.h"
 #include <sqlite3.h>
@@ -35,9 +30,9 @@
 #define TEC_JSON "/root/data/fusion/tec_multi.json"
 
 int wt_tec_run(void) {
-    printf("\n━━━ 26. 等效 TEC 多源融合 (3源加权) ━━━\n");
+    printf("\n━━━ 26. 等效 TEC 经验估算 (非真实双频测量) ━━━\n");
 
-    /* 1. 取 Kp */
+    /* 1. 取 Kp + F10.7 */
     sqlite3 *db;
     double kp = -1, f107 = -1, s4_t = -1;
     if (sqlite3_open(WENTIAN_DB, &db) == SQLITE_OK) {
@@ -49,64 +44,59 @@ int wt_tec_run(void) {
             }
             sqlite3_finalize(st);
         }
-        /* S4 */
-        if (sqlite3_prepare_v2(db, "SELECT fused_s4 FROM multisrc_s4 ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK) {
+        /* 取最新的S4 */
+        if (sqlite3_prepare_v2(db, "SELECT s4_gps FROM local_ionosphere ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK) {
             if (sqlite3_step(st) == SQLITE_ROW) {
                 s4_t = sqlite3_column_double(st, 0);
+                if (s4_t < 0) s4_t = 0;
             }
             sqlite3_finalize(st);
         }
         sqlite3_close(db);
     }
 
-    /* 2. 三源 TEC 推算 */
-    /* Kp → TEC: Kp 1→10, Kp 5→30 TECU */
+    /* 2. 三源估算 (均标记为经验/非实测) */
     double tec_kp = (kp >= 0) ? (kp + 1.0) * 5.0 : -1;
-    /* F10.7 → TEC: 100 sfu → 10 TECU */
-    double tec_f107 = (f107 > 0) ? f107 * 0.1 : -1;
-    /* S4 → TEC: S4 0.3 → 30 TECU */
-    double tec_s4 = (s4_t > 0) ? s4_t * 100.0 : -1;
+    double tec_f107 = (f107 >= 0) ? f107 * 0.1 : -1;
+    /* S4→TEC关联性存在但无定量公式, 仅打印供参考 */
+    double tec_s4 = (s4_t > 0.01) ? s4_t * 100.0 : -1;
 
-    printf("  ── 三源估算 ──\n");
-    printf("    Kp=%.1f → TEC=%.1f TECU | F10.7=%.1f → TEC=%.1f TECU | S4=%.3f → TEC=%.1f TECU\n",
-           kp, tec_kp, f107, tec_f107, s4_t, tec_s4);
+    printf("  ── 三源经验估算(非真实测量) ──\n");
+    printf("    Kp=%.1f → TEC≈%.0f TECU | F10.7=%.0f → TEC≈%.0f TECU",
+           kp, tec_kp, f107, tec_f107);
+    if (tec_s4 > 0) printf(" | S4=%.3f → TEC≈%.0f TECU", s4_t, tec_s4);
+    printf("\n");
 
-    /* 3. 加权融合 */
-    double vals[] = {tec_kp, tec_f107, tec_s4};
-    double wts[]  = {0.50,   0.20,     0.30};
-    /* names unused */ (void)0;
-    int n = 3;
+    /* 3. 融合 (加权) */
+    double tec_fused = 0, total_w = 0;
+    int n_src = 0;
+    if (tec_kp > 0) { tec_fused += tec_kp * 0.5; total_w += 0.5; n_src++; }
+    if (tec_f107 > 0) { tec_fused += tec_f107 * 0.3; total_w += 0.3; n_src++; }
+    if (tec_s4 > 0) { tec_fused += tec_s4 * 0.2; total_w += 0.2; n_src++; }
 
-    double w_sum = 0, fused = 0;
-    int used = 0;
-    for (int i = 0; i < n; i++) {
-        if (vals[i] > 0) {
-            fused += vals[i] * wts[i];
-            w_sum += wts[i];
-            used++;
-        }
+    if (total_w == 0) {
+        printf("  ── 无有效数据源, 无法估算TEC\n");
+        return 0;
     }
-    if (w_sum > 0) fused /= w_sum;
+    tec_fused /= total_w;
 
-    printf("  ── 融合结果 ──\n");
-    printf("    等效 TEC = %.1f TECU (源数:%d/3)\n", fused, used);
+    printf("  ── 加权融合结果(经验) ──\n");
+    printf("     等效 TEC ≈ %.1f TECU (源数:%d/3, 经验估算, 非双频测量)\n",
+           tec_fused, n_src);
 
-    /* 4. 写入 JSON */
-    mkdir("/root/data/fusion", 0755);
+    /* 4. 存JSON */
     FILE *f = fopen(TEC_JSON, "w");
     if (f) {
         fprintf(f, "{\n");
         fprintf(f, "  \"ts\": %ld,\n", (long)time(NULL));
-        fprintf(f, "  \"sources\": {\n");
-        fprintf(f, "    \"kp\": {\"value\": %.1f, \"tec_eq\": %.1f},\n", kp, tec_kp);
-        fprintf(f, "    \"f107\": {\"value\": %.1f, \"tec_eq\": %.1f},\n", f107, tec_f107);
-        fprintf(f, "    \"s4\": {\"value\": %.3f, \"tec_eq\": %.1f},\n", s4_t, tec_s4);
-        fprintf(f, "  },\n");
-        fprintf(f, "  \"fused_tec\": %.1f,\n", fused);
-        fprintf(f, "  \"used_n\": %d\n", used);
+        fprintf(f, "  \"note\": \"经验估算(非双频测量), 仅供参考\",\n");
+        fprintf(f, "  \"tec_kp_est\": %.1f,\n", tec_kp);
+        fprintf(f, "  \"tec_f107_est\": %.1f,\n", tec_f107);
+        fprintf(f, "  \"tec_fused_est\": %.1f,\n", tec_fused);
+        fprintf(f, "  \"sources\": %d\n", n_src);
         fprintf(f, "}\n");
         fclose(f);
+        printf("  ✅ 已存入 tec_multi.json\n");
     }
-    printf("  ✅ 已存入 tec_multi.json\n");
     return 0;
 }

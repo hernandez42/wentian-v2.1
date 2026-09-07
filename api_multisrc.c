@@ -243,45 +243,34 @@ static double multisrc_uno_pressure_delta(void) {
     return recent - old;  /* hPa 正=气压升(冷锋), 负=气压降(雷暴) */
 }
 
-/* ── 主入口: 多源融合 S4 ─────────────────────────────────── */
+/* ── 主入口: 多源S4 (经验估算, 非实测) ──────────────────── */
 int wt_multisrc_run(void) {
-    printf("\n━━━ 23. 多源融合 S4 引擎 (5源加权) ━━━\n");
+    printf("\n━━━ 23. 多源S4经验估算 (非实测, 仅供参考) ━━━\n");
 
-    /* 采集5源 S4/SNR/Kp/ΔP */
-    double s4_sdr = multisrc_sdr_s4(NULL, NULL);
+    /* 有效源: GNSS串口(实测), Kp→S4(经验), UNO压变(经验) */
     double s4_uart = multisrc_gnss_uart_s4(NULL);
     double kp = multisrc_openmeteo_kp();
     double dp_30min = multisrc_uno_pressure_delta();
 
-    /* SDR原始峰值 (用于诊断) */
-    double sdr_peak_snr = 0, sdr_peak_freq = 0;
-    multisrc_sdr_s4(&sdr_peak_snr, &sdr_peak_freq);
     double uart_avg_snr = 0;
     multisrc_gnss_uart_s4(&uart_avg_snr);
 
-    /* Open-Meteo Kp → 等效S4 (经验: Kp 5 ≈ S4 0.3) */
+    /* Kp → 等效S4 (经验估算, 非物理公式) */
     double s4_openmeteo = (kp >= 0 && kp <= 9) ? (kp * 0.06) : -1.0;
 
-    /* UNO 气压30min变化 → 间接S4 (1.5hPa对应S4≈0.2)
-     * ⚠ 修复(2026-09-06): dp_30min==-1.0 是"无数据"错误码, 不能当真实压降
-     * (旧逻辑 fabs(-1)>0.5 会编造出 0.133 的假S4源) */
+    /* UNO 气压30min变化 → 间接S4 (经验关联) */
     double s4_uno = (dp_30min > -0.5 && fabs(dp_30min) > 0.5) ? (fabs(dp_30min) / 7.5) : -1.0;
 
-    /* 源5 (ScintPi) 占位 - 当前DB无该数据, 设为-1不参与 */
-    double s4_scintpi = -1.0;
-
-    printf("  ── 5源数据采集 ──\n");
-    printf("    [1] SDR扫频     S4=%.3f | 峰SNR=%.2fdB @ %.3fMHz\n",
-           s4_sdr >= 0 ? s4_sdr : 0.0, sdr_peak_snr, sdr_peak_freq);
-    printf("    [2] ATGM336H串口 S4=%.3f | 平均SNR=%.1fdB\n",
+    printf("  ── 有效源 ──\n");
+    printf("    [实测] GNSS串口 S4=%.3f | 平均SNR=%.1fdB\n",
            s4_uart >= 0 ? s4_uart : 0.0, uart_avg_snr);
-    printf("    [3] Open-Meteo Kp=%.1f → S4=%.3f\n", kp, s4_openmeteo);
-    printf("    [4] UNO气压30min ΔP=%.2fhPa → S4=%.3f\n", dp_30min, s4_uno);
-    printf("    [5] ScintPi    S4=%.3f (ScintPi数据源待接入)\n", s4_scintpi);
+    printf("    [经验] Kp=%.1f → 等效S4≈%.3f\n", kp, s4_openmeteo);
+    printf("    [经验] UNO气压30min ΔP=%.2fhPa → 等效S4≈%.3f\n", dp_30min, s4_uno);
+    printf("  (SDR扫频/ScintPi暂未接入, 不计入)\n");
 
-    /* ── 加权融合 (缺失源动态调整权重) ──────────────────── */
-    double weights[5] = {W_SDR, W_GNSS_UART, W_OPENMETEO, W_UNO, W_SCINTPI};
-    double values[5] = {s4_sdr, s4_uart, s4_openmeteo, s4_uno, s4_scintpi};
+    /* 加权融合 (经验, 仅供参考) */
+    double weights[5] = {0.0, 0.6, 0.25, 0.15, 0.0};  /* SDR/ScintPi权重为0 */
+    double values[5] = {-1.0, s4_uart, s4_openmeteo, s4_uno, -1.0};
     /* names unused */ (void)0;
 
     /* 归一化权重 (跳过NO DATA) */

@@ -146,6 +146,15 @@ static int load_gnss_snr(double *gps_snrs, int gps_max,
     return ng;
 }
 
+/* ── BDS SNR计数 (从load_gnss_snr填充的数组, 非零个数) ──── */
+static int count_bds_snr(const double *bds_snrs, int max) {
+    int cnt = 0;
+    for (int i = 0; i < max; i++) {
+        if (bds_snrs[i] > 0) cnt++;
+    }
+    return cnt;
+}
+
 /* ── Klobuchar电离层延迟模型 ────────────────────────────── */
 /* 输入: 纬度(度), 经度(度), 海拔(m), UTC秒数(当天)
  * 输出: 垂直延迟(s), 斜向延迟(s), 斜向因子, 周期(s)
@@ -230,6 +239,7 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts) {
         out->s4_bds = -1.0;
         return -1;
     }
+    int nb = count_bds_snr(bds_snrs, 64);
     /* 计算S4 — v2.1低SNR鲁棒算法 (主人2026-09-04升级要求)
      * 阈值: C/N0 ≥ 20 dB-Hz (放宽以适应问天实测 GPS=20-25, BDS=21-26)
      * 算法: 对数域 S4 = sqrt(Var(SNR))/mean(SNR)
@@ -239,10 +249,13 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts) {
     double valid_gps_cnt = 0, valid_bds_cnt = 0;
     out->s4_gps = calc_s4_robust_low_snr(gps_snrs, ng,
                                           &avg_gps_snr_calc, &valid_gps_cnt);
-    out->s4_bds = calc_s4_robust_low_snr(bds_snrs, ng,
+    out->s4_bds = calc_s4_robust_low_snr(bds_snrs, nb,
                                           &avg_bds_snr_calc, &valid_bds_cnt);
-    out->valid_gps_samples = valid_gps_cnt;
-    out->valid_bds_samples = valid_bds_cnt;
+    /* 当S4不可算时设为0 (不存-1.0进DB) */
+    if (out->s4_gps < 0) out->s4_gps = 0;
+    if (out->s4_bds < 0) out->s4_bds = 0;
+    out->valid_gps_samples = (int)valid_gps_cnt;
+    out->valid_bds_samples = (int)valid_bds_cnt;
     out->total_samples = ng;
     snprintf(out->algorithm_used, sizeof(out->algorithm_used),
              "%s", (avg_gps_snr_calc >= 35.0) ? "v2.0-Std" : "v2.1-LowSNR");
@@ -297,8 +310,8 @@ static int ion_db_save(const wt_gnss_ion_t *p) {
     sqlite3_bind_int64(st, 1, (sqlite3_int64)p->ts);
     sqlite3_bind_double(st, 2, p->s4_gps);
     sqlite3_bind_double(st, 3, p->s4_bds);
-    sqlite3_bind_int(st, 4, 64);
-    sqlite3_bind_int(st, 5, 64);
+    sqlite3_bind_int(st, 4, p->valid_gps_samples);
+    sqlite3_bind_int(st, 5, p->valid_bds_samples);
     sqlite3_bind_double(st, 6, p->avg_gps_snr);
     sqlite3_bind_double(st, 7, p->avg_bds_snr);
     sqlite3_bind_double(st, 8, p->avg_pdop);
