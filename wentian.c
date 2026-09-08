@@ -431,7 +431,36 @@ int wentian_collect_all(void) {
         printf("     DOP: PDOP=%.1f HDOP=%.1f VDOP=%.1f\n", gnss.pdop, gnss.hdop, gnss.vdop);
         wt_local_save_gnss(&gnss);
         ok++;
-    } else fail++;
+    } else {
+        /* 三级缓存: 读local_gnss表上一条有效数据 */
+        printf("  ⚠ GPS/北斗离线, 使用缓存数据...\n");
+        sqlite3 *db_c;
+        if (sqlite3_open(WENTIAN_DB, &db_c) == SQLITE_OK) {
+            sqlite3_stmt *st_c;
+            if (sqlite3_prepare_v2(db_c,
+                "SELECT lat,lon,alt,fix,gps_sats,bds_sats,pdop,hdop,vdop,gps_snr,bds_snr "
+                "FROM local_gnss WHERE fix > 0 ORDER BY ts DESC LIMIT 1",
+                -1, &st_c, NULL) == SQLITE_OK && sqlite3_step(st_c) == SQLITE_ROW) {
+                gnss.lat = sqlite3_column_double(st_c, 0);
+                gnss.lon = sqlite3_column_double(st_c, 1);
+                gnss.alt = sqlite3_column_double(st_c, 2);
+                gnss.fix = sqlite3_column_int(st_c, 3);
+                gnss.gps_sats = sqlite3_column_int(st_c, 4);
+                gnss.bds_sats = sqlite3_column_int(st_c, 5);
+                gnss.pdop = sqlite3_column_double(st_c, 6);
+                gnss.hdop = sqlite3_column_double(st_c, 7);
+                gnss.vdop = sqlite3_column_double(st_c, 8);
+                gnss.gps_snr = sqlite3_column_double(st_c, 9);
+                gnss.bds_snr = sqlite3_column_double(st_c, 10);
+                printf("  ✅ [缓存] 位置=%.4f°N,%.4f°E 卫星: GPS=%d颗 北斗=%d颗\n",
+                    gnss.lat, gnss.lon, gnss.gps_sats, gnss.bds_sats);
+                ok++;
+            }
+            sqlite3_finalize(st_c);
+            sqlite3_close(db_c);
+        }
+        if (!ok) fail++;
+    }
 
     printf("\n━━━ 14. 主人GNSS电离层 (S4+Klobuchar) ━━━\n");
     wt_iono_t iono = {0};
@@ -459,7 +488,37 @@ int wentian_collect_all(void) {
         }
         ok++;
     } else {
-        printf("  ⚠ SDR扫频文件未找到\n");
+        /* SDR缓存: 从local_sdr读最近一次有效扫频 */
+        sqlite3 *db_c;
+        if (sqlite3_open(WENTIAN_DB, &db_c) == SQLITE_OK) {
+            sqlite3_stmt *st_c;
+            if (sqlite3_prepare_v2(db_c,
+                "SELECT file,band,noise_dbm,peak_mhz,peak_dbm,peak_snr,ts FROM local_sdr "
+                "WHERE ts > 0 ORDER BY ts DESC LIMIT 3",
+                -1, &st_c, NULL) == SQLITE_OK) {
+                int n = 0;
+                while (sqlite3_step(st_c) == SQLITE_ROW && n < 3) {
+                    const char *b = (const char*)sqlite3_column_text(st_c, 1);
+                    strncpy(sdr_peaks[n].band, b ? b : "?", sizeof(sdr_peaks[n].band)-1);
+                    sdr_peaks[n].peak_freq_mhz = sqlite3_column_double(st_c, 3);
+                    sdr_peaks[n].peak_dbm = sqlite3_column_double(st_c, 4);
+                    sdr_peaks[n].peak_snr = sqlite3_column_double(st_c, 5);
+                    sdr_peaks[n].noise_floor_dbm = sqlite3_column_double(st_c, 2);
+                    n++; n_sdr++;
+                }
+                sqlite3_finalize(st_c);
+            }
+            sqlite3_close(db_c);
+        }
+        if (n_sdr > 0) {
+            for (int i = 0; i < n_sdr; i++)
+                printf("  ✅ [缓存] [%s] %.3fMHz @ %.1fdBm\n",
+                    sdr_peaks[i].band, sdr_peaks[i].peak_freq_mhz, sdr_peaks[i].peak_dbm);
+            ok++;
+        } else {
+            printf("  ⚠ SDR扫频文件未找到, 缓存也无可用的\n");
+            fail++;
+        }
     }
 
     /* ═══ 16. Kalman气压融合 (UNO+OM+METAR) ═══════════ */
