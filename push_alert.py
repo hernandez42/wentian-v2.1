@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 
 NOWCAST_JSON = '/root/data/fusion/nowcast.json'
 CORREL_JSON = '/root/data/fusion/radar_correlation.json'
-ALERT_STATE = '/root/data/fusion/alert_state.json'
+ALERT_STATE = '/root/data/fusion/alert_push_state.json'  # 独立去重状态, 勿与其他进程共享alert_state.json
 FEISHU_USER = os.environ.get('FEISHU_USER_ID', 'ou_52a5a07c6c4c825ccb530efe5befcc77')
 
 # ── Mac风格图标 ────────────────────────────────────────────
@@ -346,12 +346,12 @@ def main():
         print(f'[push_alert] CALM(评分{score}), 跳过')
         return 0
 
-    # 去重
+    # 去重: 硬性30分钟冷却(不管level是否变化), 满足主人要求"30分钟一次"
     state = load_alert_state()
     now = time.time()
-    if not args.force and level == state.get('last_level') and now < state.get('suppress_until', 0):
+    if not args.force and now < state.get('suppress_until', 0):
         remaining = int(state['suppress_until'] - now)
-        print(f'[push_alert] ⏭ {level}已推送, {remaining}s后再推')
+        print(f'[push_alert] ⏭ 冷却中, {remaining}s后再推(最近已是{state.get("last_level")})')
         return 0
 
     # 发送
