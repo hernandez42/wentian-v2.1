@@ -405,29 +405,52 @@ static int wt_predict_compute(wt_predict_t *out) {
     memset(out, 0, sizeof(*out));
     out->ts = time(NULL);
 
-    /* 1. 加载UNO气压 */
+    /* 1. 加载气压序列 — 网络(Open-Meteo outdoor)为主, UNO本地验证互补 */
     double p_series[720] = {0};
-    int n_p = load_uno_pressure(6, p_series, 720);
-    if (n_p < 10) {
-        /* UNO离线 → 从outdoor表加载(室外实况) */
+    int n_p = 0;
+    int src_net = 0;
+    {
         sqlite3 *db;
         if (sqlite3_open(WENTIAN_DB, &db) == SQLITE_OK) {
             sqlite3_stmt *st;
             if (sqlite3_prepare_v2(db,
-                "SELECT pressure FROM outdoor WHERE pressure > 0 AND ts > ? ORDER BY ts",
+                "SELECT pressure, ts FROM outdoor WHERE pressure > 0 AND ts > ? ORDER BY ts",
                 -1, &st, NULL) == SQLITE_OK) {
                 sqlite3_bind_int64(st, 1, (sqlite3_int64)(time(NULL) - 21600));
-                n_p = 0;
                 while (sqlite3_step(st) == SQLITE_ROW && n_p < 720)
                     p_series[n_p++] = sqlite3_column_double(st, 0);
                 sqlite3_finalize(st);
-                if (n_p >= 10) printf("  ⚠ UNO离线, 改用outdoor(Open-Meteo)气压 %d条\n", n_p);
             }
             sqlite3_close(db);
         }
+        if (n_p >= 10) { src_net = 1; }
+    }
+    if (n_p < 10) {
+        /* 网络失效 → 本地UNO互补(搬出机柜后真实室外) */
+        n_p = load_uno_pressure(6, p_series, 720);
+        if (n_p >= 10) printf("  ⚠ 网络气压数据不足(%d条), 改用UNO本地互补\n", n_p);
     }
     if (n_p < 10) return -1;
     out->P_current = p_series[n_p - 1];
+
+    /* 1b. 验证: UNO vs 网络气压交叉校验 */
+    if (src_net) {
+        double uno_pa = 0;
+        sqlite3 *db0;
+        if (sqlite3_open("/root/data/ano_weather.db", &db0) == SQLITE_OK) {
+            sqlite3_stmt *st0;
+            if (sqlite3_prepare_v2(db0,
+                "SELECT pa FROM ano_weather WHERE source='UNO_v2.0_bridge' AND pa > 0 ORDER BY ts DESC LIMIT 1",
+                -1, &st0, NULL) == SQLITE_OK && sqlite3_step(st0) == SQLITE_ROW) {
+                uno_pa = sqlite3_column_double(st0, 0);
+            }
+            sqlite3_finalize(st0);
+            sqlite3_close(db0);
+        }
+        if (uno_pa > 0 && fabs(uno_pa - out->P_current) > 20.0)
+            printf("  ⚠ 网络vs本地气压差异大: 网络=%.1f UNO海压=%.1f 差=%.1f\n",
+                   out->P_current, uno_pa, out->P_current - uno_pa);
+    }
 
     /* 2. 气压预测 1h/3h/6h (步数: 60min/180min/360min) */
     double f1, s1, r1;

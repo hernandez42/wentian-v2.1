@@ -125,7 +125,7 @@ static int load_gnss_pos(double *lat, double *lon, double *alt) {
     return 0;
 }
 
-/* ── 从室外气象表读实况(非机柜!) ───────────────────────── */
+/* ── 从室外气象表读实况(网络主源) ───────────────────────── */
 static int load_outdoor_latest(double *t, double *rh, double *p_sea, time_t *ts) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
@@ -146,6 +146,27 @@ static int load_outdoor_latest(double *t, double *rh, double *p_sea, time_t *ts)
     return 0;
 }
 
+/* ── 从UNO读最新数据(本地验证源, 已搬出机柜=真实室外) ───── */
+static int load_uno_latest(double *t, double *rh, double *p_sea, time_t *ts) {
+    sqlite3 *db;
+    if (sqlite3_open("/root/data/ano_weather.db", &db) != SQLITE_OK) return -1;
+    sqlite3_stmt *st;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT t,h,pa,ts FROM ano_weather "
+        "WHERE source='UNO_v2.0_bridge' ORDER BY ts DESC LIMIT 1", -1, &st, NULL);
+    if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
+    if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); sqlite3_close(db); return -1; }
+    *t = sqlite3_column_double(st, 0);
+    *rh = sqlite3_column_double(st, 1);
+    *p_sea = sqlite3_column_double(st, 2);
+    *ts = time(NULL);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    /* 有效性: pa是海压, 700~1100合理 */
+    if (*t < -50 || *t > 60 || *rh < 0 || *rh > 100 || *p_sea < 700 || *p_sea > 1100) return -1;
+    return 0;
+}
+
 /* ── 单次PWV反演 ───────────────────────────────────────── */
 int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
     memset(out, 0, sizeof(*out));
@@ -154,8 +175,27 @@ int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
     double T_c, rh, p_sea, lat, lon, alt;
     time_t ts;
 
-    /* 1. 取室外实况(非机柜室内! PWV反演必须用大气数据) */
-    if (load_outdoor_latest(&T_c, &rh, &p_sea, &ts) != 0) return -1;
+    /* 1. 主源: 网络气象(Open-Meteo/met.no/wttr.in) */
+    int src = 0;  /* 0=网络, 1=本地UNO */
+    if (load_outdoor_latest(&T_c, &rh, &p_sea, &ts) != 0) {
+        /* 网络失效 → UNO本地互补 */
+        if (load_uno_latest(&T_c, &rh, &p_sea, &ts) != 0) return -1;
+        src = 1;
+    }
+
+    /* 1b. 验证: 本地UNO交叉校验(搬出机柜=真实室外) */
+    {
+        double u_t, u_rh, u_p;
+        time_t u_ts;
+        if (src == 0 && load_uno_latest(&u_t, &u_rh, &u_p, &u_ts) == 0) {
+            double dt = fabs(u_t - T_c);
+            double drh = fabs(u_rh - rh);
+            double dp = fabs(u_p - p_sea);
+            if (dt > 5.0 || drh > 20.0 || dp > 20.0)
+                printf("  ⚠ 网络vs本地差异大: 温差=%.1f°C 湿差=%.0f%% 压差=%.0fhPa (UNO=%.1f°C/%.0f%%/%.0fhPa 网络=%.1f°C/%.0f%%/%.0fhPa)\n",
+                       dt, drh, dp, u_t, u_rh, u_p, T_c, rh, p_sea);
+        }
+    }
     out->ts = ts;
     out->temp_c = T_c;
     out->humid_pct = rh;
