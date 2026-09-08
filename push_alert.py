@@ -214,7 +214,7 @@ def build_alert(nc, correl=None) -> dict:
     if stationary > 0: type_scores.append(f'静止锋{stationary}')
     if shear > 0: type_scores.append(f'风切变{shear}')
 
-    if type_scores:
+    if type_scores and score >= 26:
         lines.append('')
         lines.append('天气型评分')
         lines.append('  ' + '  '.join(type_scores))
@@ -228,19 +228,22 @@ def build_alert(nc, correl=None) -> dict:
         lines.append(f'警报等级 {wl}')
     if pi and pi not in ('无降水', '无数据'):
         lines.append(f'降水强度 {pi}')
-    if fcn:
+    if fcn and score >= 26:
         lines.append(f'注释 {fcn}')
 
-    # 软件雷达(v1.6)
-    if correl and correl.get('coherence', 0) > 0.1:
-        lines.append('')
-        lines.append('软件雷达')
-        lines.append(f'  相干 {correl["coherence"]:.0%}')
-        lines.append(f'  模式 {correl.get("pattern_name","?")} 置信{correl.get("confidence",0):.0%}')
-        lines.append(f'  提前 {correl.get("lead_time_min",0)}min')
-        if correl.get('sdr_active'): lines.append('  SDR 异常')
-        if correl.get('gnss_anomaly'): lines.append('  GNSS 异常')
-        if correl.get('uno_pressure_change'): lines.append('  UNO 气压变')
+    # 软件雷达(v1.6) — 仅匹配到有效天气型时展示, 避免UNKNOWN假数据
+    if correl and correl.get('coherence', 0) > 0.3:
+        mp = correl.get('matched_pattern') or correl.get('pattern_name', '')
+        mp_s = '' if mp is None else str(mp)
+        if mp_s and mp_s.upper() not in ('UNKNOWN', '', 'NONE'):
+            lines.append('')
+            lines.append('软件雷达')
+            lines.append(f'  相干 {correl["coherence"]:.0%}')
+            lines.append(f'  模式 {mp_s} 置信{correl.get("confidence",0):.0%}')
+            lines.append(f'  提前 {correl.get("lead_time_min",0)}min')
+            if correl.get('sdr_active'): lines.append('  SDR 异常')
+            if correl.get('gnss_anomaly'): lines.append('  GNSS 异常')
+            if correl.get('uno_pressure_change'): lines.append('  UNO 气压变')
 
     # 建议(Mac风格: 简洁一行)
     lines.append('')
