@@ -514,7 +514,6 @@ int wentian_collect_all(void) {
         if (rc != 0) printf("  ⚠ 钦天监失败 rc=%d\n", rc);
         rc = system("python3 /root/scripts/wentian/astral.py 2>/dev/null");
         if (rc != 0) printf("  ⚠ 星象失败 rc=%d\n", rc);
-    }
     /* WeatherNext 2 — 每3小时刷新一次(防Open-Meteo 429限流) */
     {
         struct stat wn_st;
