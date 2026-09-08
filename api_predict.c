@@ -522,8 +522,8 @@ static int wt_predict_compute(wt_predict_t *out) {
         out->alert_score += 1;
     }
 
-    /* 10. 等级 (阈值受自进化factor微调) */
-    /* 读取自进化系数, 闭环回传: factor<1收紧(降阈值→更敏感), >1放松 */
+    /* 10. 等级 (阈值受自进化+钦天监双重微调) */
+    /* 读取自进化系数 */
     double evolve_factor = 1.0;
     FILE *ef = fopen("/root/data/fusion/evolve_factor.json", "r");
     if (ef) {
@@ -535,9 +535,25 @@ static int wt_predict_compute(wt_predict_t *out) {
         fclose(ef);
     }
     if (evolve_factor <= 0 || evolve_factor > 2.0) evolve_factor = 1.0;
-    double th_1 = 8.0 * evolve_factor;
-    double th_2 = 5.0 * evolve_factor;
-    double th_3 = 2.0 * evolve_factor;
+
+    /* 读取钦天监增强系数 */
+    double imperial_factor = 1.0;
+    {
+        int fd = open("/root/data/fusion/imperial_enhancement.json", O_RDONLY);
+        if (fd >= 0) {
+            char buf[4096] = {0};
+            read(fd, buf, sizeof(buf)-1); close(fd);
+            const char *ap = strstr(buf, "\"alert_threshold\":");
+            if (ap) {
+                double v = strtod(ap + 19, NULL);
+                if (v > 0.5 && v < 2.0) imperial_factor = v;
+            }
+        }
+    }
+    double total_factor = evolve_factor * imperial_factor;
+    double th_1 = 8.0 * total_factor;
+    double th_2 = 5.0 * total_factor;
+    double th_3 = 2.0 * total_factor;
 
     if (out->alert_score >= th_1) snprintf(out->level, sizeof(out->level), "SEVERE");
     else if (out->alert_score >= th_2) snprintf(out->level, sizeof(out->level), "WARNING");
