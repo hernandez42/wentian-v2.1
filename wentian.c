@@ -301,8 +301,11 @@ int wentian_collect_all(void) {
     } else fail++;
     wt_swpc_scale_t scale = {0};
     if (wt_swpc_scales(&scale) == 0) {
-        printf("  ✅ NOAA尺度: G%d S%d R%d (日期=%s)\n",
-            scale.g_scale, scale.s_scale, scale.r_scale, scale.date);
+        printf("  ✅ NOAA尺度: ");
+        if (scale.g_scale > 0) printf("G%d ", scale.g_scale); else printf("G- ");
+        if (scale.s_scale > 0) printf("S%d ", scale.s_scale); else printf("S- ");
+        if (scale.r_scale > 0) printf("R%d", scale.r_scale); else printf("R-");
+        printf(" (日期=%s 无活动)\n", scale.date);
         wt_db_save_scale(&scale);
         ok++;
     } else fail++;
