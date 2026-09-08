@@ -252,7 +252,7 @@ int wt_local_sdr(wt_sdr_t *out, int max, int *count) {
             /* CSV第一行: date, time, start_hz, end_hz, bin_hz, num_bins, dBm1, ... */
             char line[4096];
             if (!fgets(line, sizeof(line), fp)) { fclose(fp); continue; }
-            fclose(fp);
+            rewind(fp);  /* keep fp open: 下面还要读全部数据行 */
             char date[32], time_str[32];
             double start_hz, end_hz, bin_hz;
             int num_bins;
