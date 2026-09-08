@@ -94,40 +94,6 @@ static int storm_score(double pwv, double pwv_delta, double rh, double press) {
     return (score > 100) ? 100 : score;
 }
 
-/* ── 从UNO取最新数据 ───────────────────────────────────── */
-static int load_uno_latest(double *t, double *rh, double *p_sea, time_t *ts) {
-    sqlite3 *db;
-    if (sqlite3_open("/root/data/ano_weather.db", &db) != SQLITE_OK) return -1;
-
-    sqlite3_stmt *st;
-    int rc = sqlite3_prepare_v2(db,
-        "SELECT ts,t,h,pa FROM ano_weather "
-        "WHERE source='UNO_v2.0_bridge' ORDER BY ts DESC LIMIT 1", -1, &st, NULL);
-    if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
-    if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); sqlite3_close(db); return -1; }
-
-    /* ts是字符串格式 */
-    const char *ts_str = (const char *)sqlite3_column_text(st, 0);
-    *ts = time(NULL);
-    if (ts_str) {
-        struct tm tm = {0};
-        if (sscanf(ts_str, "%d-%d-%dT%d:%d:%d",
-            &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
-            &tm.tm_hour, &tm.tm_min, &tm.tm_sec) == 6) {
-            tm.tm_year -= 1900;
-            tm.tm_mon -= 1;
-            tm.tm_isdst = -1;
-            *ts = mktime(&tm);
-        }
-    }
-    *t = sqlite3_column_double(st, 1);
-    *rh = sqlite3_column_double(st, 2);
-    *p_sea = sqlite3_column_double(st, 3);
-    sqlite3_finalize(st);
-    sqlite3_close(db);
-    return 0;
-}
-
 /* ── 从GNSS取最新坐标 ──────────────────────────────────── */
 static int load_gnss_pos(double *lat, double *lon, double *alt) {
     *lat = 25.09917;
@@ -159,6 +125,27 @@ static int load_gnss_pos(double *lat, double *lon, double *alt) {
     return 0;
 }
 
+/* ── 从室外气象表读实况(非机柜!) ───────────────────────── */
+static int load_outdoor_latest(double *t, double *rh, double *p_sea, time_t *ts) {
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_stmt *st;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT temp, humid, pressure, ts FROM outdoor ORDER BY ts DESC LIMIT 1",
+        -1, &st, NULL);
+    if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
+    if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); sqlite3_close(db); return -1; }
+    *t = sqlite3_column_double(st, 0);
+    *rh = sqlite3_column_double(st, 1);
+    *p_sea = sqlite3_column_double(st, 2);
+    *ts = (time_t)sqlite3_column_int64(st, 3);
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    /* 室外数据有效性检查 */
+    if (*t < -50 || *t > 60 || *rh < 0 || *rh > 100) return -1;
+    return 0;
+}
+
 /* ── 单次PWV反演 ───────────────────────────────────────── */
 int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
     memset(out, 0, sizeof(*out));
@@ -167,8 +154,8 @@ int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
     double T_c, rh, p_sea, lat, lon, alt;
     time_t ts;
 
-    /* 1. 取UNO数据 */
-    if (load_uno_latest(&T_c, &rh, &p_sea, &ts) != 0) return -1;
+    /* 1. 取室外实况(非机柜室内! PWV反演必须用大气数据) */
+    if (load_outdoor_latest(&T_c, &rh, &p_sea, &ts) != 0) return -1;
     out->ts = ts;
     out->temp_c = T_c;
     out->humid_pct = rh;
