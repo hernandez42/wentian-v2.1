@@ -232,8 +232,13 @@ int wt_open_data_run(void) {
     double f107 = NAN, f107_mean = NAN;
     int rc_f107 = fetch_noaa_f107(&f107, &f107_mean);
     if (rc_f107 == 0) {
-        printf("  ✅ [2] NOAA SWPC F10.7 太阳射电通量 | flux=%.1f sfu 90日均值=%.1f\n",
-               f107, f107_mean);
+        /* 当90日均值不可用时显示N/A而非0.0 */
+        if (!isnan(f107_mean) && f107_mean > 0)
+            printf("  ✅ [2] NOAA SWPC F10.7 太阳射电通量 | flux=%.1f sfu 90日均值=%.1f\n",
+                   f107, f107_mean);
+        else
+            printf("  ✅ [2] NOAA SWPC F10.7 太阳射电通量 | flux=%.1f sfu (90日均值暂缺)\n",
+                   f107);
     } else {
         printf("  ⚠️ [2] NOAA F10.7 拉取失败\n");
     }
@@ -244,8 +249,12 @@ int wt_open_data_run(void) {
     int rc_mn = fetch_metno(&mn_temp, &mn_humid, &mn_pressure, &mn_wind,
                             mn_summary, sizeof(mn_summary));
     if (rc_mn == 0) {
-        printf("  ✅ [3] met.no (挪威) | T=%.1f°C H=%.0f%% P=%.0fhPa 风=%.1fm/s | %s\n",
-               mn_temp, mn_humid, mn_pressure, mn_wind, mn_summary);
+        printf("  ✅ [3] met.no (挪威) |");
+        if (!isnan(mn_temp)) printf(" T=%.1f°C", mn_temp);
+        if (!isnan(mn_humid)) printf(" H=%.0f%%", mn_humid);
+        if (!isnan(mn_pressure)) printf(" P=%.0fhPa", mn_pressure);
+        if (!isnan(mn_wind)) printf(" 风=%.1fm/s", mn_wind);
+        printf(" | %s\n", mn_summary);
     } else {
         printf("  ⚠️ [3] met.no 拉取失败\n");
     }
@@ -255,8 +264,10 @@ int wt_open_data_run(void) {
     char wt_desc[64] = {0};
     int rc_wt = fetch_wttr(&wt_temp, &wt_humid, wt_desc, sizeof(wt_desc));
     if (rc_wt == 0) {
-        printf("  ✅ [4] wttr.in (CC-BY) | T=%.1f°C H=%.0f%% | %s\n",
-               wt_temp, wt_humid, wt_desc);
+        printf("  ✅ [4] wttr.in (CC-BY) |");
+        if (!isnan(wt_temp)) printf(" T=%.1f°C", wt_temp);
+        if (!isnan(wt_humid)) printf(" H=%.0f%%", wt_humid);
+        printf(" | %s\n", wt_desc);
     } else {
         printf("  ⚠️ [4] wttr.in 拉取失败\n");
     }
