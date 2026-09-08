@@ -262,55 +262,57 @@ int wt_radar_correlate(wt_radar_correl_t *out, time_t ts, int window_min) {
     out->ts = ts ? ts : time(NULL);
     out->lead_time_min = 15;  /* 默认提前15分钟 */
 
-    /* 1. 加载三路特征 */
+    /* 1. 加载三路特征 (忽略返回值, 特征保持0=无数据) */
     double sdr_feat[16] = {0};
     double gnss_feat[8] = {0};
     double uno_feat[6] = {0};
 
-    load_sdr_features(out->ts, window_min, sdr_feat, 16);
-    load_gnss_features(out->ts, window_min, gnss_feat, 8);
-    load_uno_features(out->ts, window_min, uno_feat, 6);
+    int sdr_ok = (load_sdr_features(out->ts, window_min, sdr_feat, 16) == 0);
+    int gnss_ok = (load_gnss_features(out->ts, window_min, gnss_feat, 8) == 0);
+    int uno_ok = (load_uno_features(out->ts, window_min, uno_feat, 6) == 0);
+
+    if (!sdr_ok && !gnss_ok && !uno_ok) {
+        /* 所有源都失败, 无法做相干分析 */
+        out->matched_pattern = WT_PATTERN_UNKNOWN;
+        out->confidence = 0.0;
+        strncpy(out->pattern_name, "UNKNOWN", sizeof(out->pattern_name) - 1);
+        return 0;
+    }
 
     memcpy(out->sdr_features, sdr_feat, sizeof(sdr_feat));
     memcpy(out->gnss_features, gnss_feat, sizeof(gnss_feat));
     memcpy(out->uno_features, uno_feat, sizeof(uno_feat));
 
-    /* 2. 异常检测(每路独立判断) */
-    /* SDR: 峰值SNR > 15dB 或 2m频段SNR突变 */
-    out->sdr_active = (sdr_feat[3] > 15.0 || sdr_feat[6] > 15.0) ? 1 : 0;
+    /* 2. 异常检测(每路独立判断, 仅当有数据时) */
+    out->sdr_active = sdr_ok && (sdr_feat[3] > 15.0 || sdr_feat[6] > 15.0);
+    out->gnss_anomaly = gnss_ok && (gnss_feat[0] > 40.0 || gnss_feat[1] > CORR_S4_THR ||
+                                     gnss_feat[2] > CORR_S4_THR);
+    out->uno_pressure = uno_ok && (fabs(uno_feat[4]) > CORR_PRESS_THR);
+    out->uno_temp = uno_ok && (fabs(uno_feat[5]) > CORR_TEMP_THR);
 
-    /* GNSS: PWV>40mm 或 S4>0.3 或 SNR异常 */
-    out->gnss_anomaly = (gnss_feat[0] > 40.0 || gnss_feat[1] > CORR_S4_THR ||
-                          gnss_feat[2] > CORR_S4_THR) ? 1 : 0;
+    /* 3. 互相关系数(仅做趋势参考, 非时间序列配对, 不构成独立物理证据) */
+    out->corr_sg = (sdr_ok && gnss_ok) ? corrcoef(sdr_feat, gnss_feat, 8) : 0;
+    out->corr_su = (sdr_ok && uno_ok) ? corrcoef(sdr_feat, uno_feat, 6) : 0;
+    out->corr_gu = (gnss_ok && uno_ok) ? corrcoef(gnss_feat, uno_feat, 6) : 0;
 
-    /* UNO: 气压变化>0.5hPa/10min 或 温度变化>1°C/10min */
-    out->uno_pressure = (fabs(uno_feat[4]) > CORR_PRESS_THR) ? 1 : 0;
-    out->uno_temp = (fabs(uno_feat[5]) > CORR_TEMP_THR) ? 1 : 0;
-
-    /* 3. 互相关系数(用特征向量近似) */
-    /* SDR↔GNSS: 峰值SNR vs PWV/S4 */
-    out->corr_sg = corrcoef(sdr_feat, gnss_feat, 8);
-    /* SDR↔UNO: 峰值SNR vs 气压/温度 */
-    out->corr_su = corrcoef(sdr_feat, uno_feat, 6);
-    /* GNSS↔UNO: PWV/S4 vs 气压/温度 */
-    out->corr_gu = corrcoef(gnss_feat, uno_feat, 6);
-
-    /* 4. 相干系数(三路相关性综合) */
-    double c = (fabs(out->corr_sg) + fabs(out->corr_su) + fabs(out->corr_gu)) / 3.0;
-    out->coherence = (c > 1.0) ? 1.0 : c;
-
-    /* 5. 模式匹配 */
+    /* 4. 模式匹配 (基于"谁触发"而非相关系数) */
     out->matched_pattern = match_pattern(out);
-    out->confidence = out->coherence;  /* 简化: 相干系数=置信度 */
+
+    /* 5. 置信度: 基于有效源数 + 模式匹配一致性 */
+    int n_active = (sdr_ok ? 1 : 0) + (gnss_ok ? 1 : 0) + (uno_ok ? 1 : 0);
+    out->confidence = (n_active >= 2 && out->matched_pattern != WT_PATTERN_UNKNOWN) ? 0.6 : 0.2;
+    if (n_active >= 3 && out->matched_pattern != WT_PATTERN_UNKNOWN) out->confidence = 0.8;
+    /* coherence保留为历史兼容(不再用于置信度计算) */
+    out->coherence = out->confidence;
 
     /* 命名 */
     const char *names[] = { "UNKNOWN", "THUNDER", "SQUALL", "FALSE_COLD", "STATIONARY", "WIND_SHEAR" };
     strncpy(out->pattern_name, names[out->matched_pattern], sizeof(out->pattern_name) - 1);
 
-    /* 提前量: 根据相干性调整 */
-    if (out->coherence > 0.6) out->lead_time_min = 10;
-    else if (out->coherence > 0.3) out->lead_time_min = 20;
-    else out->lead_time_min = 30;
+    /* 提前量: 置信度越高→提前量越大(预警可靠) */
+    if (out->confidence > 0.6) out->lead_time_min = 30;
+    else if (out->confidence > 0.3) out->lead_time_min = 20;
+    else out->lead_time_min = 10;
 
     return 0;
 }
