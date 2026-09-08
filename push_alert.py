@@ -28,15 +28,16 @@ FEISHU_USER = os.environ.get('FEISHU_USER_ID', 'ou_52a5a07c6c4c825ccb530efe5befc
 
 # ── Mac风格图标 ────────────────────────────────────────────
 ICONS = {
-    'THUNDER':  '⛈',
-    'SQUALL':   '🌪',
-    'FALSE_COLD': '❄',
-    'STATIONARY': '🌫',  # 准静止锋
-    'WIND_SHEAR': '💨',
-    'RAINSTORM': '🌧',      # 暴雨
-    'WATCH':    '🟡',
-    'WARNING':  '🟠',
-    'SEVERE':   '🔴',
+    'THUNDER':  '⛈', '雷暴': '⛈',
+    'SQUALL':   '🌪', '飑线': '🌪',
+    'FALSE_COLD': '❄', '假冷锋': '❄',
+    'STATIONARY': '🌫', '准静止锋': '🌫', '静止锋': '🌫',  # 准静止锋
+    'WIND_SHEAR': '💨', '风切变': '💨',
+    'RAINSTORM': '🌧', '暴雨': '🌧',      # 暴雨
+    'WATCH':    '🟡', '关注': '🟡',
+    'WARNING':  '🟠', '预警': '🟠',
+    'SEVERE':   '🔴', '强预警': '🔴',
+    '稳定': '✅',
 }
 
 LEVEL_CN = {
@@ -241,19 +242,20 @@ def build_alert(nc, correl=None) -> dict:
             lines.append(f'  相干 {correl["coherence"]:.0%}')
             lines.append(f'  模式 {mp_s} 置信{correl.get("confidence",0):.0%}')
             lines.append(f'  提前 {correl.get("lead_time_min",0)}min')
-            if correl.get('sdr_active'): lines.append('  SDR 异常')
-            if correl.get('gnss_anomaly'): lines.append('  GNSS 异常')
-            if correl.get('uno_pressure_change'): lines.append('  UNO 气压变')
+            if correl.get('sdr_active'): lines.append('  SDR 信号异常')
+            if correl.get('gnss_anomaly'): lines.append('  GNSS 信号异常')
+            if correl.get('uno_pressure_change'): lines.append('  UNO 气压突变')
 
     # 建议(Mac风格: 简洁一行)
     lines.append('')
     advice_map = {
         'SEVERE': '⚠️ 立即停止户外作业 远离金属物体',
         'WARNING': '⚠️ 减少户外活动 关注预警升级',
-        'SQUALL': '⚠️ 飑线过境 注意强风',
-        'WIND_SHEAR': '⚠️ 低空风切变 航空注意',
-        'FALSE_COLD': '⚠️ 温度骤降 注意添衣',
-        'STATIONARY': '⚠️ 持续阴雨 注意防潮',
+        'THUNDER': '⛈ 雷暴活动 注意防雷', '雷暴': '⛈ 雷暴活动 注意防雷',
+        'SQUALL': '⚠️ 飑线过境 注意强风', '飑线': '⚠️ 飑线过境 注意强风',
+        'WIND_SHEAR': '⚠️ 低空风切变 航空注意', '风切变': '⚠️ 低空风切变 航空注意',
+        'FALSE_COLD': '⚠️ 温度骤降 注意添衣', '假冷锋': '⚠️ 温度骤降 注意添衣',
+        'STATIONARY': '⚠️ 持续阴雨 注意防潮', '准静止锋': '⚠️ 持续阴雨 注意防潮', '静止锋': '⚠️ 持续阴雨 注意防潮',
     }
     advice = advice_map.get(level, '保持关注天气变化')
     lines.append(f'建议 {advice}')

@@ -598,6 +598,13 @@ static void wt_false_cold_note(char *out, int max_len) {
 int wt_nowcast_compute(wt_nowcast_t *out) {
     memset(out, 0, sizeof(*out));
     out->ts = time(NULL);
+    /* ⚠ METAR缺失时气压/温度字段必须为"不可用", 而非静默0.0。
+     * memset(0)把缺失数据伪装成真实0值, 是造假信号 — 用NAN做哨兵,
+     * JSON输出层靠isnan()跳过, 展示端显示"不可用"。 */
+    out->press_current = NAN;
+    out->press_3min_ago = NAN;
+    out->temp_current = NAN;
+    out->temp_5min_ago = NAN;
 
     /* ── 加载PWV ──────────────────────────────────────── */
     double pwv_times[120], pwv_vals[120];
@@ -836,11 +843,11 @@ static int wt_nowcast_save_json(const wt_nowcast_t *nc) {
     fprintf(f, "  \"wind_shear_score\": %d,\n", nc->wind_shear_score);
     fprintf(f, "  \"pwv_current\": %.2f,\n", nc->pwv_current);
     fprintf(f, "  \"pwv_slope_15min\": %.2f,\n", nc->pwv_slope);
-    if (nc->press_current > 0.5)
+    if (!isnan(nc->press_current))
         fprintf(f, "  \"press_current\": %.1f,\n", nc->press_current);
     else
         fprintf(f, "  \"press_current\": null,\n");
-    if (nc->temp_current > -100.0)
+    if (!isnan(nc->temp_current))
         fprintf(f, "  \"temp_current\": %.1f,\n", nc->temp_current);
     else
         fprintf(f, "  \"temp_current\": null,\n");
