@@ -82,6 +82,10 @@ typedef struct {
     /* 电离层 */
     double  s4_max;
     char    ion_warning[32];
+    /* 钦天监增强因子 */
+    double  imperial_storm_factor;    /* 节气风暴因子 */
+    double  imperial_precip_factor;   /* 五行降水修正 */
+    int     imperial_system_stable;   /* 系统稳定度 */
 } wt_predict_t;
 
 /* ── 线性回归预测 (输入时间序列, 滑动窗口lookback, 预测步数) ─── */
@@ -327,14 +331,15 @@ static int load_ionosphere(double *s4_max, char *warn_out, int max_w) {
 /* ── 风暴前兆检测 (返回 0-5 评分) ─────────────────────────── */
 static int detect_storm_precursor(const double *p_series, int n,
                                    double s4_max, double visibility,
+                                   double storm_factor,  /* 钦天监节气因子 */
                                    char *signals_out, int max_sig) {
     int score = 0;
     int pos = 0;
-
-    /* 信号1: UNO气压1h骤降>1.5hPa */
+    /* 风暴阈值受节气因子调整: factor<1(秋冬季)→阈值升高(不易触发) */
+    double thr_drop = 1.5 / (storm_factor > 0.1 ? storm_factor : 0.5);
     if (n >= 60) {
         double drop_30min = p_series[n - 30] - p_series[n - 1];
-        if (drop_30min > 1.5) {
+        if (drop_30min > thr_drop) {
             pos += snprintf(signals_out + pos, max_sig - pos,
                             "%s 30min气压骤降%.1fhPa|",
                             drop_30min > 3.0 ? "📉📉" : "📉", drop_30min);
@@ -372,6 +377,29 @@ static int detect_storm_precursor(const double *p_series, int n,
     return score;
 }
 
+/* ── 读取钦天监增强因子 ────────────────────────────────── */
+/* 从imperial_enhancement.json读所有传统文化维度, 返回因子 */
+static void read_imperial_factors(double *precip_adj, double *press_adj,
+                                   double *storm_adj, int *system_stable) {
+    *precip_adj = 1.0; *press_adj = 1.0;
+    *storm_adj = 1.0; *system_stable = 1;
+    FILE *f = fopen("/root/data/fusion/imperial_enhancement.json", "r");
+    if (!f) return;
+    char buf[8192] = {0};
+    size_t n = fread(buf, 1, sizeof(buf)-1, f); fclose(f);
+    if (n == 0) return;
+
+    const char *v;
+    v = strstr(buf, "\"precip_adjust_factor\":");
+    if (v) { double x = strtod(v + 23, NULL); if (x > 0) *precip_adj = x; }
+    v = strstr(buf, "\"press_adjust_factor\":");
+    if (v) { double x = strtod(v + 22, NULL); if (x > 0) *press_adj = x; }
+    v = strstr(buf, "\"term_storm_factor\":");
+    if (v) { double x = strtod(v + 20, NULL); if (x > 0.1) *storm_adj = x; }
+    v = strstr(buf, "\"system_stable\":");
+    if (v) { *system_stable = (int)strtod(v + 16, NULL); }
+}
+
 /* ── 多源融合预测主入口 ────────────────────────────────────── */
 static int wt_predict_compute(wt_predict_t *out) {
     memset(out, 0, sizeof(*out));
@@ -395,14 +423,32 @@ static int wt_predict_compute(wt_predict_t *out) {
         out->P_6h = f1;
     }
 
+    /* 2b. 钦天监增强：五行/节气因子修正气压预测 */
+    {
+        double p_adj, pr_adj, s_adj;
+        int ss;
+        read_imperial_factors(&pr_adj, &p_adj, &s_adj, &ss);
+        out->P_1h *= p_adj;
+        out->P_3h *= p_adj;
+        out->P_6h *= p_adj;
+        /* 节气风暴因子影响风暴检测阈值 */
+        out->imperial_storm_factor = s_adj;
+        out->imperial_system_stable = ss;
+        out->imperial_precip_factor = pr_adj;
+        if (pr_adj != 1.0 || p_adj != 1.0)
+            printf("  🏮 钦天监: 气压修正×%.3f 降水修正×%.3f 风暴因子=%.2f\n",
+                   p_adj, pr_adj, s_adj);
+    }
+
     /* 3. 加载 Open-Meteo 室外 */
     double cloud_3h = 0, rain_3h = 0;
     if (load_outdoor(&out->T_current, &out->H_current, NULL, NULL,
                       &cloud_3h, &rain_3h,
                       &out->T_1h, &out->T_3h, &out->T_6h)) {
-        /* Open-Meteo3h天气 */
-        if (rain_3h > 70) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌧 大雨");
-        else if (rain_3h > 30) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌦 小雨");
+        /* Open-Meteo3h天气 (经钦天监降水因子修正) */
+        double rain_thr = 70.0 / (out->imperial_precip_factor > 0.1 ? out->imperial_precip_factor : 1.0);
+        if (rain_3h > rain_thr) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌧 大雨");
+        else if (rain_3h > rain_thr * 0.43) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌦 小雨");
         else if (cloud_3h > 70) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "☁ 阴");
         else if (cloud_3h > 30) snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "🌤 多云");
         else snprintf(out->openmeteo_3h, sizeof(out->openmeteo_3h), "☀ 晴");
@@ -481,6 +527,7 @@ static int wt_predict_compute(wt_predict_t *out) {
     /* 8. 风暴前兆 */
     out->storm_score = detect_storm_precursor(p_series, n_p,
                                                out->s4_max, vis,
+                                               out->imperial_storm_factor,
                                                out->storm_signals,
                                                sizeof(out->storm_signals));
 
@@ -536,21 +583,13 @@ static int wt_predict_compute(wt_predict_t *out) {
     }
     if (evolve_factor <= 0 || evolve_factor > 2.0) evolve_factor = 1.0;
 
-    /* 读取钦天监增强系数 */
-    double imperial_factor = 1.0;
-    {
-        int fd = open("/root/data/fusion/imperial_enhancement.json", O_RDONLY);
-        if (fd >= 0) {
-            char buf[4096] = {0};
-            read(fd, buf, sizeof(buf)-1); close(fd);
-            const char *ap = strstr(buf, "\"alert_threshold\":");
-            if (ap) {
-                double v = strtod(ap + 19, NULL);
-                if (v > 0.5 && v < 2.0) imperial_factor = v;
-            }
-        }
-    }
-    double total_factor = evolve_factor * imperial_factor;
+    /* 钦天监增强: 复用已读取的因子 */
+    double imperial_factor = out->imperial_storm_factor;
+    if (imperial_factor <= 0.1 || imperial_factor > 2.0) imperial_factor = 1.0;
+    /* 系统稳定度修正: unstable(0)时阈值降低20%提高灵敏度 */
+    double stable_factor = (out->imperial_system_stable == 0) ? 0.8 : 1.0;
+
+    double total_factor = evolve_factor * imperial_factor * stable_factor;
     double th_1 = 8.0 * total_factor;
     double th_2 = 5.0 * total_factor;
     double th_3 = 2.0 * total_factor;
