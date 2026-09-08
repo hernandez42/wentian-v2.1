@@ -68,6 +68,11 @@ time_t parse_iso(const char *s) {
         end = strptime(s, "%Y-%m-%d", &tm);
         if (!end) return 0;
     }
+    /* 跳过小数秒 (如 .000Z) — AviationWeather API 返回 reportTime 带 .000Z */
+    if (*end == '.') {
+        end++;
+        while (*end >= '0' && *end <= '9') end++;
+    }
     /* 处理时区: Z=UTC, +HH:MM=-HH:MM, 无则按系统时区 */
     if (*end == 'Z' || *end == 'z') return timegm(&tm);
     if (*end == '+' || *end == '-') {
@@ -118,10 +123,13 @@ int wt_aviation_metar(const char *icao, wt_metar_t *out) {
     char *raw = wt_json_dup(obj, "rawOb");
     if (raw) { strncpy(out->raw, raw, sizeof(out->raw)-1); free(raw); }
 
-    /* obs time */
-    char *obs = wt_json_dup(obj, "reportTime");
-    if (obs) { out->obs_time = parse_iso(obs); free(obs); }
-    else out->obs_time = time(NULL);
+    /* obs time — 优先用 obsTime (整数UTC时间戳), 避免 parse_iso 时区偏移 */
+    out->obs_time = wt_json_int(obj, "obsTime", 0);
+    if (out->obs_time == 0) {
+        char *obs = wt_json_dup(obj, "reportTime");
+        if (obs) { out->obs_time = parse_iso(obs); free(obs); }
+        else out->obs_time = time(NULL);
+    }
 
     free(obj);
     free(json);

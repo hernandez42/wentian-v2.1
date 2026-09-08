@@ -259,13 +259,16 @@ int wentian_collect_all(void) {
     const char *alt_icaos[] = {"ZUUK", "ZPLJ", "ZUTF"};
     for (int i = 0; i < 3; i++) {
         wt_metar_t alt = {0};
-        if (wt_aviation_metar(alt_icaos[i], &alt) == 0) {
+        /* ⚠ 修复(2026-09-08): 备用机场无真实METAR时禁写合成数据。
+         * 旧逻辑 fallback 到 wt_metar_fallback_run() 硬编码ZPPP坐标,
+         * 生成 SYNTHETIC ZPPP 数据写回 metar 表, 覆盖主站刚拉到的真实METAR,
+         * 导致 nowcast 读到合成气压1010而非真实1022。 */
+        if (wt_aviation_metar(alt_icaos[i], &alt) == 0 && alt.obs_time > time(NULL) - 10800) {
             printf("  ✅ %s T=%.0f°C 风%d°/%dkt 气压=%.0fhPa\n",
                 alt.icao, alt.temp, alt.wind_dir, alt.wind_speed_kt, alt.altim_hpa);
             wt_db_save_metar(&alt);
-        } else if (wt_metar_fallback_run(&alt) == 0 && alt.obs_time > 0) {
-            printf("  ✅ %s T=%.0f°C (源:ECMWF降级)\n", alt.icao, alt.temp);
-            wt_db_save_metar(&alt);
+        } else {
+            printf("  ⚠️ %s 无新鲜真实METAR, 跳过(禁写合成数据防污染ZPPP)\n", alt_icaos[i]);
         }
     }
 

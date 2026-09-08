@@ -162,9 +162,9 @@ def build_alert(nc, correl=None) -> dict:
     lines.append('核心指标')
     pwv = nc.get('pwv_current', 0)
     slope = nc.get('pwv_slope_15min', 0)
-    press = nc.get('press_current', 0)
+    press = nc.get('press_current')   # None if 缺失/不可用
     dp = nc.get('dp_3min', 0)
-    temp = nc.get('temp_current', 0)
+    temp = nc.get('temp_current')     # None if 缺失/不可用
     dt = nc.get('dt_5min', 0)
 
     # PWV
@@ -181,18 +181,24 @@ def build_alert(nc, correl=None) -> dict:
         lines.append(f'  PWV变化  {direction}{abs(slope):.1f}mm/15min')
 
     # 气压
-    if abs(dp) > 0.3:
-        direction = '↑' if dp > 0 else '↓'
-        lines.append(f'  气压  {press:.1f}hPa ({direction}{abs(dp):.1f}hPa/3min)')
+    if press is not None and press > 0.5:
+        if abs(dp) > 0.3:
+            direction = '↑' if dp > 0 else '↓'
+            lines.append(f'  气压  {press:.1f}hPa ({direction}{abs(dp):.1f}hPa/3min)')
+        else:
+            lines.append(f'  气压  {press:.1f}hPa')
     else:
-        lines.append(f'  气压  {press:.1f}hPa')
+        lines.append('  气压  不可用')
 
     # 温度
-    if abs(dt) > 0.3:
-        direction = '↑' if dt > 0 else '↓'
-        lines.append(f'  温度  {temp:.1f}°C ({direction}{abs(dt):.1f}°C/5min)')
+    if temp is not None:
+        if abs(dt) > 0.3:
+            direction = '↑' if dt > 0 else '↓'
+            lines.append(f'  温度  {temp:.1f}°C ({direction}{abs(dt):.1f}°C/5min)')
+        else:
+            lines.append(f'  温度  {temp:.1f}°C')
     else:
-        lines.append(f'  温度  {temp:.1f}°C')
+        lines.append('  温度  不可用')
 
     # 各天气型评分(v1.5)
     thunder = nc.get('thunder_score', 0)

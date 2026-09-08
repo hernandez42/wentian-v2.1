@@ -836,8 +836,14 @@ static int wt_nowcast_save_json(const wt_nowcast_t *nc) {
     fprintf(f, "  \"wind_shear_score\": %d,\n", nc->wind_shear_score);
     fprintf(f, "  \"pwv_current\": %.2f,\n", nc->pwv_current);
     fprintf(f, "  \"pwv_slope_15min\": %.2f,\n", nc->pwv_slope);
-    fprintf(f, "  \"press_current\": %.1f,\n", nc->press_current);
-    fprintf(f, "  \"temp_current\": %.1f,\n", nc->temp_current);
+    if (nc->press_current > 0.5)
+        fprintf(f, "  \"press_current\": %.1f,\n", nc->press_current);
+    else
+        fprintf(f, "  \"press_current\": null,\n");
+    if (nc->temp_current > -100.0)
+        fprintf(f, "  \"temp_current\": %.1f,\n", nc->temp_current);
+    else
+        fprintf(f, "  \"temp_current\": null,\n");
     fprintf(f, "  \"squall_press_rise\": %.2f,\n", nc->squall_press_rise);
     fprintf(f, "  \"squall_wd_chg\": %.1f,\n", nc->squall_wd_chg);
     fprintf(f, "  \"squall_pwv_drop\": %.2f,\n", nc->squall_pwv_drop);
@@ -898,6 +904,14 @@ int wt_nowcast_run(void) {
             fprintf(tf, "  \"wind_shear_score\": %d,\n", nc.wind_shear_score);
             fprintf(tf, "  \"pwv_current\": %.2f,\n", nc.pwv_current);
             fprintf(tf, "  \"pwv_slope_15min\": %.2f,\n", nc.pwv_slope);
+            if (nc.press_current > 0.5)
+                fprintf(tf, "  \"press_current\": %.1f,\n", nc.press_current);
+            else
+                fprintf(tf, "  \"press_current\": null,\n");
+            if (nc.temp_current > -100.0)
+                fprintf(tf, "  \"temp_current\": %.1f,\n", nc.temp_current);
+            else
+                fprintf(tf, "  \"temp_current\": null,\n");
             fprintf(tf, "  \"dp_3min\": %.2f,\n", nc.dp_3min);
             fprintf(tf, "  \"dt_5min\": %.2f,\n", nc.dt_5min);
             fprintf(tf, "  \"alert_msg\": \"%s\"\n", nc.alert_msg);
