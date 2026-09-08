@@ -161,7 +161,7 @@ def build_alert(nc, correl=None) -> dict:
 
     # 核心指标 (Mac风格: 指标名 + 值, 对齐)
     lines.append('核心指标')
-    pwv = nc.get('pwv_current', 0)
+    pwv = nc.get('pwv_current')  # None if 缺失/不可用 (与press/temp一致)
     slope = nc.get('pwv_slope_15min', 0)
     press = nc.get('press_current')   # None if 缺失/不可用
     dp = nc.get('dp_3min', 0)
@@ -170,11 +170,14 @@ def build_alert(nc, correl=None) -> dict:
 
     # PWV
     pwv_label = 'PWV'
-    pwv_val = f'{pwv:.1f}mm'
-    if pwv > 50: pwv_val += ' ⚠极端'
-    elif pwv > 45: pwv_val += ' ⚠高'
-    elif pwv > 40: pwv_val += ' 偏高'
-    lines.append(f'  {pwv_label}  {pwv_val}')
+    if pwv is not None and pwv > 0.5:
+        pwv_val = f'{pwv:.1f}mm'
+        if pwv > 50: pwv_val += ' ⚠极端'
+        elif pwv > 45: pwv_val += ' ⚠高'
+        elif pwv > 40: pwv_val += ' 偏高'
+        lines.append(f'  {pwv_label}  {pwv_val}')
+    else:
+        lines.append(f'  {pwv_label}  不可用')
 
     # PWV变化
     if abs(slope) > 0.3:

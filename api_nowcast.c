@@ -605,6 +605,9 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
     out->press_3min_ago = NAN;
     out->temp_current = NAN;
     out->temp_5min_ago = NAN;
+    /* PWV同样 — GNSS缺失时pwv=0是物理假值(PWV不可能为0) */
+    out->pwv_current = NAN;
+    out->pwv_15min_ago = NAN;
 
     /* ── 加载PWV ──────────────────────────────────────── */
     double pwv_times[120], pwv_vals[120];
@@ -841,7 +844,10 @@ static int wt_nowcast_save_json(const wt_nowcast_t *nc) {
     fprintf(f, "  \"false_cold_note\": \"%s\",\n", nc->false_cold_note);
     fprintf(f, "  \"stationary_score\": %d,\n", nc->stationary_score);
     fprintf(f, "  \"wind_shear_score\": %d,\n", nc->wind_shear_score);
-    fprintf(f, "  \"pwv_current\": %.2f,\n", nc->pwv_current);
+    if (!isnan(nc->pwv_current))
+        fprintf(f, "  \"pwv_current\": %.2f,\n", nc->pwv_current);
+    else
+        fprintf(f, "  \"pwv_current\": null,\n");
     fprintf(f, "  \"pwv_slope_15min\": %.2f,\n", nc->pwv_slope);
     if (!isnan(nc->press_current))
         fprintf(f, "  \"press_current\": %.1f,\n", nc->press_current);
@@ -909,13 +915,16 @@ int wt_nowcast_run(void) {
             fprintf(tf, "  \"false_cold_score\": %d,\n", nc.false_cold_score);
             fprintf(tf, "  \"stationary_score\": %d,\n", nc.stationary_score);
             fprintf(tf, "  \"wind_shear_score\": %d,\n", nc.wind_shear_score);
-            fprintf(tf, "  \"pwv_current\": %.2f,\n", nc.pwv_current);
+            if (!isnan(nc.pwv_current))
+                fprintf(tf, "  \"pwv_current\": %.2f,\n", nc.pwv_current);
+            else
+                fprintf(tf, "  \"pwv_current\": null,\n");
             fprintf(tf, "  \"pwv_slope_15min\": %.2f,\n", nc.pwv_slope);
-            if (nc.press_current > 0.5)
+            if (!isnan(nc.press_current))
                 fprintf(tf, "  \"press_current\": %.1f,\n", nc.press_current);
             else
                 fprintf(tf, "  \"press_current\": null,\n");
-            if (nc.temp_current > -100.0)
+            if (!isnan(nc.temp_current))
                 fprintf(tf, "  \"temp_current\": %.1f,\n", nc.temp_current);
             else
                 fprintf(tf, "  \"temp_current\": null,\n");

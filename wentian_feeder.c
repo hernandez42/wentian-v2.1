@@ -340,7 +340,11 @@ static int export_one(sqlite3 *db, FILE *out) {
         write_kv_int(out, "squall_score", sqlite3_column_int(st, 5), 0);
         write_kv_int(out, "stationary_score", sqlite3_column_int(st, 6), 0);
         write_kv_int(out, "wind_shear_score", sqlite3_column_int(st, 7), 0);
-        write_kv_num(out, "pwv_current", sqlite3_column_double(st, 8), 0);
+        double _pwv = sqlite3_column_double(st, 8);
+        if (sqlite3_column_type(st, 8) != SQLITE_NULL)
+            write_kv_num(out, "pwv_current", _pwv, 0);
+        else
+            write_kv_num(out, "pwv_current", NAN, 0); /* NULL→NAN→write_kv_num跳过 */
         write_kv_num(out, "precip_1h_mm", sqlite3_column_double(st, 9), 0);
         const unsigned char *am = sqlite3_column_text(st, 10);
         write_kv_esc(out, "alert_msg", (const char*)am, 1);
