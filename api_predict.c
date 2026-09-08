@@ -408,6 +408,24 @@ static int wt_predict_compute(wt_predict_t *out) {
     /* 1. 加载UNO气压 */
     double p_series[720] = {0};
     int n_p = load_uno_pressure(6, p_series, 720);
+    if (n_p < 10) {
+        /* UNO离线 → 从outdoor表加载(室外实况) */
+        sqlite3 *db;
+        if (sqlite3_open(WENTIAN_DB, &db) == SQLITE_OK) {
+            sqlite3_stmt *st;
+            if (sqlite3_prepare_v2(db,
+                "SELECT pressure FROM outdoor WHERE pressure > 0 AND ts > ? ORDER BY ts",
+                -1, &st, NULL) == SQLITE_OK) {
+                sqlite3_bind_int64(st, 1, (sqlite3_int64)(time(NULL) - 21600));
+                n_p = 0;
+                while (sqlite3_step(st) == SQLITE_ROW && n_p < 720)
+                    p_series[n_p++] = sqlite3_column_double(st, 0);
+                sqlite3_finalize(st);
+                if (n_p >= 10) printf("  ⚠ UNO离线, 改用outdoor(Open-Meteo)气压 %d条\n", n_p);
+            }
+            sqlite3_close(db);
+        }
+    }
     if (n_p < 10) return -1;
     out->P_current = p_series[n_p - 1];
 

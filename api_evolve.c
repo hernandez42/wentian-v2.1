@@ -133,7 +133,7 @@ static int load_metar_obs(time_t target_ts, int window_sec,
     sqlite3_stmt *st;
     int rc = sqlite3_prepare_v2(db,
         "SELECT ts, temp, altim, raw FROM metar "
-        "WHERE ts >= ? AND ts <= ? ORDER BY ts LIMIT 1",
+        "WHERE raw NOT LIKE 'SYNTHETIC%%' AND ts >= ? AND ts <= ? ORDER BY ts LIMIT 1",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
     sqlite3_bind_int64(st, 1, (sqlite3_int64)(target_ts - window_sec));
