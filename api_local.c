@@ -202,45 +202,57 @@ int wt_local_iono(wt_iono_t *out) {
 
 int wt_local_sdr(wt_sdr_t *out, int max, int *count) {
     *count = 0;
-    /* 动态找最新扫频目录 (不写死日期) */
+    /* 找最新非空扫频目录: 按mtime排序, 跳过全0字节目录 */
     char sweep_dir[256] = {0};
+    time_t newest_mtime = 0;
     {
         glob_t g;
         memset(&g, 0, sizeof(g));
-        int grc = glob("/root/data/sdr/*sweep*", GLOB_ONLYDIR, NULL, &g);
-        if (grc == 0 && g.gl_pathc > 0) {
-            /* 取字典序最大(日期最新的)目录 */
-            snprintf(sweep_dir, sizeof(sweep_dir), "%s", g.gl_pathv[g.gl_pathc - 1]);
+        if (glob("/root/data/sdr/*sweep*", GLOB_ONLYDIR, NULL, &g) == 0) {
+            for (size_t i = 0; i < g.gl_pathc; i++) {
+                struct stat sd;
+                if (stat(g.gl_pathv[i], &sd) != 0) continue;
+                /* 跳过v4前缀(旧业余频段, 非GNSS) */
+                if (strstr(g.gl_pathv[i], "/v4_") || strstr(g.gl_pathv[i], "gnss_sweep")) continue;
+                /* 跳过目录内全是0字节CSV的 */
+                glob_t csv;
+                memset(&csv, 0, sizeof(csv));
+                char pat[512]; snprintf(pat, sizeof(pat), "%s/*.csv", g.gl_pathv[i]);
+                int has_data = 0;
+                if (glob(pat, 0, NULL, &csv) == 0) {
+                    for (size_t j = 0; j < csv.gl_pathc; j++) {
+                        struct stat cs;
+                        if (stat(csv.gl_pathv[j], &cs) == 0 && cs.st_size > 100) { has_data = 1; break; }
+                    }
+                    globfree(&csv);
+                }
+                if (!has_data) continue;
+                if (sd.st_mtime > newest_mtime) {
+                    newest_mtime = sd.st_mtime;
+                    snprintf(sweep_dir, sizeof(sweep_dir), "%s", g.gl_pathv[i]);
+                }
+            }
         }
         globfree(&g);
     }
-    if (sweep_dir[0] == '\0') {
-        /* 兜底: 没有sweep目录则跳过 */
-        return 0;
-    }
+    if (sweep_dir[0] == '\0') return 0;  /* 没有可用目录 */
 
-    /* CSV格式: date, time, start_hz, end_hz, bin_hz, num_bins, dBm1, dBm2, ... */
-    char files[3][256];
-    snprintf(files[0], sizeof(files[0]), "%s/amateu2m_144M-148M.csv", sweep_dir);
-    snprintf(files[1], sizeof(files[1]), "%s/amateu70cm_430M-440M.csv", sweep_dir);
-    snprintf(files[2], sizeof(files[2]), "%s/marine_156M-163M.csv", sweep_dir);
-    const char *bands[] = {
-        "业余2m (144-148MHz)",
-        "业余70cm (430-440MHz)",
-        "海事 (156-163MHz)"
-    };
-    struct stat st_buf;
-
-    for (int f = 0; f < 3 && *count < max; f++) {
-        if (stat(files[f], &st_buf) != 0) continue;
-        FILE *fp = fopen(files[f], "r");
-        if (!fp) continue;
-
-        char line[4096];
-        double file_peak_dbm = -200, file_peak_freq = 0;
-        double file_noise_sum = 0;
-        int file_noise_count = 0;
-        while (fgets(line, sizeof(line), fp)) {
+    /* 在最新目录中找gnss_*.csv (动态, 不写死文件名) */
+    glob_t gnss_csv;
+    memset(&gnss_csv, 0, sizeof(gnss_csv));
+    char gnss_pat[512];
+    snprintf(gnss_pat, sizeof(gnss_pat), "%s/gnss_*.csv", sweep_dir);
+    int gnss_found = 0;
+    if (glob(gnss_pat, 0, NULL, &gnss_csv) == 0 && gnss_csv.gl_pathc > 0) {
+        for (size_t i = 0; i < gnss_csv.gl_pathc && *count < max; i++) {
+            struct stat cs;
+            if (stat(gnss_csv.gl_pathv[i], &cs) != 0 || cs.st_size <= 100) continue;
+            FILE *fp = fopen(gnss_csv.gl_pathv[i], "r");
+            if (!fp) continue;
+            /* CSV第一行: date, time, start_hz, end_hz, bin_hz, num_bins, dBm1, ... */
+            char line[4096];
+            if (!fgets(line, sizeof(line), fp)) { fclose(fp); continue; }
+            fclose(fp);
             char date[32], time_str[32];
             double start_hz, end_hz, bin_hz;
             int num_bins;
@@ -248,44 +260,106 @@ int wt_local_sdr(wt_sdr_t *out, int max, int *count) {
                 date, time_str, &start_hz, &end_hz, &bin_hz, &num_bins);
             if (n < 6 || num_bins <= 0 || num_bins > 2000 || bin_hz <= 0) continue;
 
-            /* 跳过前6个逗号 */
-            char *p = line;
-            for (int i = 0; i < 6; i++) {
-                p = strchr(p, ',');
-                if (!p) break;
-                p++;
-            }
-            if (!p) continue;
-
-            for (int i = 0; i < num_bins && *p; i++) {
-                double dbm;
-                if (sscanf(p, "%lf", &dbm) != 1) break;
-                double freq = start_hz + i * bin_hz;
-                if (dbm > file_peak_dbm) {
-                    file_peak_dbm = dbm;
-                    file_peak_freq = freq;
-                }
-                file_noise_sum += dbm;
-                file_noise_count++;
-                char *q = strchr(p, ',');
-                if (!q) break;
-                p = q + 1;
-            }
-        }
-        fclose(fp);
-
-        if (file_noise_count > 0) {
             wt_sdr_t *s = &out[*count];
             memset(s, 0, sizeof(*s));
-            double noise = file_noise_sum / file_noise_count;
-            strncpy(s->file, files[f], sizeof(s->file)-1);
-            strncpy(s->band, bands[f], sizeof(s->band)-1);
-            s->peak_freq_mhz = file_peak_freq / 1e6;
-            s->peak_dbm = file_peak_dbm;
-            s->peak_snr = file_peak_dbm - noise;
-            s->noise_floor_dbm = noise;
-            s->ts = st_buf.st_mtime;
+            /* 自动生成频段名: 用起始频率 */
+            double mid_mhz = (start_hz + end_hz) / 2e6;
+            if (mid_mhz > 1550 && mid_mhz < 1620)
+                snprintf(s->band, sizeof(s->band), "GNSS L1 (%.0f-%.0fMHz)", start_hz/1e6, end_hz/1e6);
+            else
+                snprintf(s->band, sizeof(s->band), "扫频%.0f-%.0fMHz", start_hz/1e6, end_hz/1e6);
+            s->peak_freq_mhz = start_hz / 1e6;  /* 从数据行解析 */
+            s->peak_dbm = -200;
+            s->noise_floor_dbm = 0;
+            s->ts = cs.st_mtime;
+
+            /* 解析所有数据行找峰值 */
+            rewind(fp);
+            double p_sum = 0;
+            int p_cnt = 0;
+            while (fgets(line, sizeof(line), fp)) {
+                n = sscanf(line, "%31[^,],%31[^,],%lf,%lf,%lf,%d",
+                    date, time_str, &start_hz, &end_hz, &bin_hz, &num_bins);
+                if (n < 6 || num_bins <= 0 || num_bins > 2000 || bin_hz <= 0) continue;
+                /* 跳过前6个逗号 */
+                char *p = line;
+                for (int c = 0; c < 6; c++) { p = strchr(p, ','); if (!p) break; p++; }
+                if (!p) continue;
+                double row_peak = -200;
+                for (int b = 0; b < num_bins && *p; b++) {
+                    double dbm;
+                    if (sscanf(p, "%lf", &dbm) != 1) break;
+                    double freq = start_hz + b * bin_hz;
+                    if (dbm > row_peak) { row_peak = dbm; s->peak_freq_mhz = freq / 1e6; }
+                    if (dbm > s->peak_dbm) s->peak_dbm = dbm;
+                    p_sum += dbm;
+                    p_cnt++;
+                    char *q = strchr(p, ',');
+                    if (!q) break;
+                    p = q + 1;
+                }
+            }
+            fclose(fp);
+            if (p_cnt > 0) s->noise_floor_dbm = p_sum / p_cnt;
+            s->peak_snr = s->peak_dbm - s->noise_floor_dbm;
+            strncpy(s->file, gnss_csv.gl_pathv[i], sizeof(s->file)-1);
             (*count)++;
+            gnss_found = 1;
+        }
+    }
+    globfree(&gnss_csv);
+    if (gnss_found) return 0;
+
+    /* 兜底: 没有gnss_*文件则尝试业余频段(旧格式) */
+    {
+        const char *old_files[] = {"amateu2m_144M-148M.csv", "amateu70cm_430M-440M.csv", "marine_156M-163M.csv"};
+        const char *old_bands[] = {"业余2m (144-148MHz)", "业余70cm (430-440MHz)", "海事 (156-163MHz)"};
+        for (int f = 0; f < 3 && *count < max; f++) {
+            char fp_buf[512];
+            snprintf(fp_buf, sizeof(fp_buf), "%s/%s", sweep_dir, old_files[f]);
+            struct stat st_buf;
+            if (stat(fp_buf, &st_buf) != 0) continue;
+            FILE *fp = fopen(fp_buf, "r");
+            if (!fp) continue;
+            char line[4096];
+            double file_peak_dbm = -200, file_peak_freq = 0;
+            double file_noise_sum = 0;
+            int file_noise_count = 0;
+            while (fgets(line, sizeof(line), fp)) {
+                char date[32], time_str[32];
+                double start_hz, end_hz, bin_hz;
+                int num_bins;
+                int n = sscanf(line, "%31[^,],%31[^,],%lf,%lf,%lf,%d",
+                    date, time_str, &start_hz, &end_hz, &bin_hz, &num_bins);
+                if (n < 6 || num_bins <= 0 || num_bins > 2000 || bin_hz <= 0) continue;
+                char *p = line;
+                for (int c = 0; c < 6; c++) { p = strchr(p, ','); if (!p) break; p++; }
+                if (!p) continue;
+                for (int i = 0; i < num_bins && *p; i++) {
+                    double dbm;
+                    if (sscanf(p, "%lf", &dbm) != 1) break;
+                    double freq = start_hz + i * bin_hz;
+                    if (dbm > file_peak_dbm) { file_peak_dbm = dbm; file_peak_freq = freq; }
+                    file_noise_sum += dbm;
+                    file_noise_count++;
+                    char *q = strchr(p, ',');
+                    if (!q) break;
+                    p = q + 1;
+                }
+            }
+            fclose(fp);
+            if (file_noise_count > 0) {
+                wt_sdr_t *s = &out[*count];
+                memset(s, 0, sizeof(*s));
+                s->noise_floor_dbm = file_noise_sum / file_noise_count;
+                strncpy(s->file, fp_buf, sizeof(s->file)-1);
+                strncpy(s->band, old_bands[f], sizeof(s->band)-1);
+                s->peak_freq_mhz = file_peak_freq / 1e6;
+                s->peak_dbm = file_peak_dbm;
+                s->peak_snr = file_peak_dbm - s->noise_floor_dbm;
+                s->ts = st_buf.st_mtime;
+                (*count)++;
+            }
         }
     }
     return 0;
