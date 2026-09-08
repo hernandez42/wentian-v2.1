@@ -165,13 +165,46 @@ int wentian_collect_all(void) {
 
     printf("\n━━━ 1. Open-Meteo 室外气象权威 ━━━\n");
     wt_outdoor_t outdoor = {0};
-    if (wt_openmeteo_current(&outdoor) == 0) {
+    int om_ok = (wt_openmeteo_current(&outdoor) == 0);
+    if (!om_ok) {
+        /* 1+1 主备: Open-Meteo失败→met.no后备 */
+        printf("  ⚠ Open-Meteo失败, 尝试 met.no 备用...\n");
+        double mn_t = NAN, mn_h = NAN, mn_p = NAN, mn_w = NAN;
+        char mn_s[64] = {0};
+        if (fetch_metno(&mn_t, &mn_h, &mn_p, &mn_w, mn_s, sizeof(mn_s)) == 0) {
+            outdoor.fetched_at = time(NULL);
+            if (!isnan(mn_t)) { outdoor.temperature = mn_t; }
+            if (!isnan(mn_h)) { outdoor.humidity = mn_h; }
+            if (!isnan(mn_p)) { outdoor.pressure_msl = mn_p; }
+            if (!isnan(mn_w)) { outdoor.wind_speed = mn_w; }
+            strncpy(outdoor.weather_text, mn_s, sizeof(outdoor.weather_text)-1);
+            om_ok = 1;
+            printf("  ✅ [备] met.no T=%.1f°C H=%.0f%% P=%.0fhPa\n",
+                   mn_t, mn_h, mn_p);
+        } else {
+            /* 再试 wttr.in 三级备用 */
+            double wt_t = NAN, wt_h = NAN;
+            char wt_d[64] = {0};
+            if (fetch_wttr(&wt_t, &wt_h, wt_d, sizeof(wt_d)) == 0) {
+                outdoor.fetched_at = time(NULL);
+                if (!isnan(wt_t)) outdoor.temperature = wt_t;
+                if (!isnan(wt_h)) outdoor.humidity = wt_h;
+                strncpy(outdoor.weather_text, wt_d, sizeof(outdoor.weather_text)-1);
+                om_ok = 1;
+                printf("  ✅ [备2] wttr.in T=%.1f°C H=%.0f%%\n", wt_t, wt_h);
+            }
+        }
+    }
+    if (om_ok) {
         printf("  ✅ T=%.1f°C H=%.0f%% P=%.1fhPa 风%.0fkm/h 天气:%s\n",
             outdoor.temperature, outdoor.humidity, outdoor.pressure_msl,
             outdoor.wind_speed, outdoor.weather_text);
         wt_db_save_outdoor(&outdoor);
         ok++;
-    } else fail++;
+    } else {
+        printf("  ⚠ 所有室外数据源均失败\n");
+        fail++;
+    }
 
     printf("\n━━━ 2. Open-Meteo 空气质量 ━━━\n");
     double pm25 = 0, pm10 = 0;

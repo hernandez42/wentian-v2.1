@@ -481,6 +481,9 @@ int wt_multisrc_run(void);            /* 5源加权 S4 融合 (SDR+UART+OpenMete
 
 /* ── 开源专业数据集成 (api_open_data.c) ───────────────────── */
 int wt_open_data_run(void);            /* NOAA SWPC + met.no + wttr.in + USGS */
+int fetch_metno(double *out_temp, double *out_humid, double *out_pressure,
+                double *out_wind, char *out_summary, int max_summary);
+int fetch_wttr(double *out_temp, double *out_humid, char *out_desc, int max_desc);
 
 /* ── 全系统自愈修复 (wt_self_repair.c) ────────────────────── */
 int wt_full_self_repair(void);          /* APEX ΔG<0 自动修复所有数据源 */

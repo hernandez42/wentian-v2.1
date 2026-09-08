@@ -140,7 +140,8 @@ static int fetch_noaa_f107(double *out_flux, double *out_mean90) {
 }
 
 /* ── 3. met.no Locationforecast (挪威气象局权威) ────────── */
-static int fetch_metno(double *out_temp, double *out_humid, double *out_pressure,
+/* 非static: 供wentian.c 1+1主备调用 */
+int fetch_metno(double *out_temp, double *out_humid, double *out_pressure,
                        double *out_wind, char *out_summary, int max_summary) {
     char *body = wt_http_get(METNO_FORECAST_URL, 15);
     if (!body) return -1;
@@ -176,7 +177,8 @@ static int fetch_metno(double *out_temp, double *out_humid, double *out_pressure
 }
 
 /* ── 4. wttr.in 当前气象 ─────────────────────────────────── */
-static int fetch_wttr(double *out_temp, double *out_humid, char *out_desc, int max_desc) {
+/* 非static: 供wentian.c 1+1主备调用 */
+int fetch_wttr(double *out_temp, double *out_humid, char *out_desc, int max_desc) {
     char *body = wt_http_get(WTTR_URL, 15);
     if (!body) return -1;
 
