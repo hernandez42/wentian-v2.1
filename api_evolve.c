@@ -76,7 +76,7 @@ static int wt_evo_db_init(const char *path) {
 static int load_forecasts(const char *predictor, int hours,
                           time_t *ts_arr, double *t_pred, double *p_pred,
                           char *wx_pred, int wx_max,
-                          int max_n) {
+                          int max_n, int offset_sec) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
 
@@ -85,16 +85,23 @@ static int load_forecasts(const char *predictor, int hours,
     int rc;
 
     if (strcmp(predictor, "multi_source") == 0) {
-        /* multi_source_forecast 表: 1h/3h/6h
-         * ⚠ 修复(2026-09-06): P_current 是 UNO 机柜站内压(~821hPa),
-         * METAR 实测是海平面压(~1016hPa), 直接相减得出 MAE=233hPa 假评分。
-         * 读出后统一换算成 MSL: P_msl = P_raw * exp(2104/8430) - 38.8
-         * (与 api_local.c UNO_P_OFFSET 同一校准) */
-        rc = sqlite3_prepare_v2(db,
-            "SELECT ts, T_current, P_current, final_weather FROM multi_source_forecast "
-            "WHERE ts >= ? ORDER BY ts", -1, &st, NULL);
+        /* multi_source_forecast 表含 T_current/P_current 与 T_1h/P_1h/T_3h/P_3h/T_6h/P_6h.
+         * ⚠ 修复(2026-09-08): 旧代码一律读 T_current/P_current, 却拿去跟
+         * 未来 offset(1h/3h/6h) 的 METAR 对比, 把"当前值"当成"未来预报",
+         * 系统性制造 8°C 假 MAE(真相: 当前23°C vs 未来~14°C)。必须按 offset
+         * 选对应预报列: 1h→T_1h/P_1h, 3h→T_3h/P_3h, 6h→T_6h/P_6h。 */
+        const char *tcol, *pcol;
+        if (offset_sec <= 3600)        { tcol = "T_1h"; pcol = "P_1h"; }
+        else if (offset_sec <= 10800)  { tcol = "T_3h"; pcol = "P_3h"; }
+        else                           { tcol = "T_6h"; pcol = "P_6h"; }
+        char q[256];
+        snprintf(q, sizeof(q),
+            "SELECT ts, %s, %s, final_weather FROM multi_source_forecast "
+            "WHERE ts >= ? ORDER BY ts", tcol, pcol);
+        rc = sqlite3_prepare_v2(db, q, -1, &st, NULL);
     } else {
-        /* nowcast 表: 只有当前预报, 1h/3h 来自预报时的当前值 */
+        /* nowcast 表: 只有当前值(temp_current/press_current), 无未来数值预报.
+         * 只能做"当前 vs 当前"(offset=0) 的传感器一致性对比, 不做 1h/3h/6h 温度MAE */
         rc = sqlite3_prepare_v2(db,
             "SELECT ts, temp_current, press_current, level FROM nowcast "
             "WHERE ts >= ? ORDER BY ts", -1, &st, NULL);
@@ -106,10 +113,23 @@ static int load_forecasts(const char *predictor, int hours,
     int is_ms = (strcmp(predictor, "multi_source") == 0);
     while (sqlite3_step(st) == SQLITE_ROW && n < max_n) {
         ts_arr[n]   = (time_t)sqlite3_column_int64(st, 0);
-        t_pred[n]   = sqlite3_column_double(st, 1);
-        p_pred[n]   = sqlite3_column_double(st, 2);
-        /* UNO机柜站内压→MSL统一尺度 (修复2026-09-06, MAE 233hPa假评分根因) */
-        if (is_ms && p_pred[n] > 700 && p_pred[n] < 950)
+        /* ⚠ 修复(2026-09-08): 预报值为NULL/0时表示数据不可用,
+         * 设为NAN确保后续对比过滤(isnan检查 + t_pred>-50比较自动排除NaN) */
+        if (sqlite3_column_type(st, 1) != SQLITE_NULL)
+            t_pred[n]   = sqlite3_column_double(st, 1);
+        else
+            t_pred[n]   = NAN;
+        if (sqlite3_column_type(st, 2) != SQLITE_NULL)
+            p_pred[n]   = sqlite3_column_double(st, 2);
+        else
+            p_pred[n]   = NAN;
+        /* ⚠ 修复(2026-09-08): 多源预报值恰为0.0 = 数据不可用(昆明9月无0°C),
+         * 以及 NULL 列 → NAN, 后续 isnan + t_pred>-50 自动排除 */
+        if (is_ms && t_pred[n] > -1 && t_pred[n] < 1) t_pred[n] = NAN;
+        /* 气压值=0也是无效(大气压>800hPa), 排除假0 */
+        if (is_ms && p_pred[n] > -1 && p_pred[n] < 1) p_pred[n] = NAN;
+        /* UNO机柜站内压→MSL统一尺度 */
+        if (is_ms && !isnan(p_pred[n]) && p_pred[n] > 700 && p_pred[n] < 950)
             p_pred[n] = p_pred[n] * exp(2104.0 / 8430.0) - 38.8;
         const char *wx = (const char *)sqlite3_column_text(st, 3);
         if (wx && wx_pred && wx_max > 0) {
@@ -131,9 +151,11 @@ static int load_metar_obs(time_t target_ts, int window_sec,
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
     sqlite3_stmt *st;
+    /* ⚠ 修复(2026-09-08): 必须过滤仅 ZPPP(昆明长水)! 表内混入 ZUTF(成都天府31°C), 
+     * 取LIMIT 1 时可能拿到成都的31°C 与本站23°C 对比, 制造 8°C 假 MAE */
     int rc = sqlite3_prepare_v2(db,
         "SELECT ts, temp, altim, raw FROM metar "
-        "WHERE raw NOT LIKE 'SYNTHETIC%%' AND ts >= ? AND ts <= ? ORDER BY ts LIMIT 1",
+        "WHERE raw LIKE 'METAR ZPPP%%' AND ts >= ? AND ts <= ? ORDER BY ts LIMIT 1",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
     sqlite3_bind_int64(st, 1, (sqlite3_int64)(target_ts - window_sec));
@@ -171,7 +193,7 @@ static int wt_evaluate_predictor(const char *predictor, int hours,
     double t_pred[200] = {0}, p_pred[200] = {0};
     char wx_pred[200][32] = {{0}};
     int n_pred = load_forecasts(predictor, hours, ts_arr, t_pred, p_pred,
-                                 (char*)wx_pred, 32, 200);
+                                 (char*)wx_pred, 32, 200, offset_sec);
     if (n_pred < 3) {
         snprintf(out->note, sizeof(out->note), "样本不足(%d)", n_pred);
         return -1;
@@ -420,15 +442,18 @@ int wt_evo_run(void) {
         printf("  ✅ 自愈检查: 全部数据表正常\n");
     }
 
-    /* 2. 评分闭环 (1h/3h/6h) */
+    /* 2. 评分闭环: multi_source 做 1h/3h/6h 真实预报校验,
+     *    nowcast 只做"当前 vs 当前"(offset=0)传感器一致性校验
+     *    ⚠ 修复(2026-09-08): nowcast 表无未来数值预报, 旧代码拿当前温度22.7°C
+     *    去比未来1h/3h/6h的METAR(~14°C), 制造8°C假MAE → 改为 offset=0 */
     wt_evo_t e1, e2, e3, e4, e5, e6;
     struct { wt_evo_t *e; const char *name; const char *label; int offset; } eval_jobs[] = {
         {&e1, "multi_source", "1h",  3600},
         {&e2, "multi_source", "3h", 10800},
         {&e3, "multi_source", "6h", 21600},
-        {&e4, "nowcast",     "1h",  3600},
-        {&e5, "nowcast",     "3h", 10800},
-        {&e6, "nowcast",     "6h", 21600},
+        {&e4, "nowcast",     "当前",    0},
+        {&e5, "nowcast",     "当前",    0},
+        {&e6, "nowcast",     "当前",    0},
     };
     int eval_ok = 0;
     for (int i = 0; i < 6; i++) {

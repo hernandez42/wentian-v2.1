@@ -624,9 +624,16 @@ static int wt_predict_compute(wt_predict_t *out) {
     }
     if (evolve_factor <= 0 || evolve_factor > 2.0) evolve_factor = 1.0;
 
-    /* 钦天监增强: 复用已读取的因子 */
-    double imperial_factor = out->imperial_storm_factor;
-    if (imperial_factor <= 0.1 || imperial_factor > 2.0) imperial_factor = 1.0;
+    /* ⚠ 修复(2026-09-08): 钦天监节气因子 — 语义反向!
+     * term_storm_factor 是"风暴风险概率"(0-1, 0.5=中性),
+     * 旧代码直接当阈值乘数: 白露0.52→阈值4.16→SEVERE误报.
+     * 正确语义: 高风险(>0.5)→降阈值(更敏感), 低风险(<0.5)→升阈值.
+     * 映射: factor = 1.0 - (risk - 0.5) * 0.6, 限制 [0.7, 1.3] */
+    double storm_risk = out->imperial_storm_factor;
+    if (storm_risk <= 0.0 || storm_risk >= 1.0) storm_risk = 0.5;
+    double imperial_factor = 1.0 - (storm_risk - 0.5) * 0.6;
+    if (imperial_factor < 0.7) imperial_factor = 0.7;
+    if (imperial_factor > 1.3) imperial_factor = 1.3;
     /* 系统稳定度修正: unstable(0)时阈值降低20%提高灵敏度 */
     double stable_factor = (out->imperial_system_stable == 0) ? 0.8 : 1.0;
 
