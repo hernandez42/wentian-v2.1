@@ -13,7 +13,7 @@
  *   2. Open-Meteo权威预测 (温度/云量/降雨)
  *   3. METAR机场实况 (ZPPP)
  *   4. 电离层 S4 闪烁修正
- *   5. Zambretti 经验公式 (26级天气)
+ *   5. Zambretti 经验公式 (本站实现为11级, 非原版26字母档)
  *
  * 输出:
  *   1h/3h/6h 温度/气压 预测
@@ -136,16 +136,19 @@ static void zambretti_v2(double p_current, double p_3h_ago,
                           double *conf_out) {
     double dp = p_current - p_3h_ago;
 
-    /* 海拔修正: 长水2115m, 加200hPa转海平面 */
-    double p_adj = p_current + 200.0;
-    (void)p_adj; /* 留作日志 */
+    /* ⚠ 修复(2026-09-09): 删除错误的"海拔修正"。
+     * 旧代码: double p_adj = p_current + 200.0;  (void)p_adj;  // 留作日志
+     * 错误1(真bug): 本站METAR气压是QNH(海平面气压, 实测约1026hPa), 再加200得
+     *   1226hPa, 使下面的 p_adj < 1005.0 恒为假 → 低气压降置信度分支从未生效。
+     * 错误2: (void)p_adj 暗示"未使用", 但下方判断实际用了它, 注释与代码不符。
+     * 现直接用 QNH 判断低气压(Zambretti 原始算法即基于海平面气压)。 */
 
     for (size_t i = 0; i < ZAMBRETTI_N; i++) {
         if (dp > ZAMBRETTI_TABLE[i].dp_min && dp <= ZAMBRETTI_TABLE[i].dp_max) {
             snprintf(wx_out, max_wx, "%s", ZAMBRETTI_TABLE[i].wx);
             *conf_out = ZAMBRETTI_TABLE[i].confidence;
-            /* 海拔修正: 低气压降置信度 */
-            if (p_adj < 1005.0 && strstr(wx_out, "晴") == NULL) {
+            /* 低气压降置信度 (现基于真实QNH, 该分支首次真正生效) */
+            if (p_current < 1005.0 && strstr(wx_out, "晴") == NULL) {
                 *conf_out *= 0.85;
             }
             return;

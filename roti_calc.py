@@ -15,6 +15,7 @@ def roti_run():
     # 从tec_multi.json收集历史数据
     tec_vals = []
     lishu_dir = os.path.join(OUT_DIR, 'lishu')
+    os.makedirs(lishu_dir, exist_ok=True)  # 修复: 目录缺失时 os.listdir 抛 FileNotFoundError 崩 daemon
     for fname in sorted(os.listdir(lishu_dir))[-7:]:
         if fname.endswith('.json'):
             try:

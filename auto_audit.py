@@ -109,6 +109,7 @@ def check_false_positives():
         "ORDER BY ts DESC LIMIT 10")
     fp_count = 0
     total_alerts = 0
+    missing_count = 0  # 2026-09-09 修复：缺测单独计数, 不计入误报率
     for row in rows:
         ts, level, score, alerts = row
         level = level or "NORMAL"
@@ -125,11 +126,11 @@ def check_false_positives():
                 if "TS" not in raw and "SQ" not in raw and "FC" not in raw:
                     fp_count += 1
             else:
-                fp_count += 1  # 无METAR也视为可疑
-    
+                missing_count += 1  # 无METAR=缺测, 非误报
+
     fp_rate = (fp_count / total_alerts * 100) if total_alerts > 0 else 0.0
-    log(f"  预警误报率: {fp_count}/{total_alerts} = {fp_rate:.0f}%")
-    return fp_rate, total_alerts
+    log(f"  预警误报率: {fp_count}/{total_alerts} = {fp_rate:.0f}% (缺测 {missing_count} 次不计入)")
+    return fp_rate, total_alerts, missing_count
 
 # ── 3. 检查PWV合理性 ──
 def check_pwv_sanity():
@@ -277,9 +278,10 @@ def main():
     results["freshness_detail"] = [(n, a) for n, a in freshness_issues]
 
     log("\n── 2. 预警误报率 ──")
-    fp_rate, total_alerts = check_false_positives()
+    fp_rate, total_alerts, missing_count = check_false_positives()
     results["false_positive_rate"] = round(fp_rate, 1)
     results["total_alerts"] = total_alerts
+    results["missing_metar"] = missing_count
 
     log("\n── 3. PWV合理性 ──")
     pwv_issues = check_pwv_sanity()

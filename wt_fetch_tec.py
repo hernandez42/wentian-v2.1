@@ -5,10 +5,12 @@ wt_fetch_tec.py — IGS 实时/快速电离层 TEC 抓取 (APEX ΔG · ℱ)
 目标: 用 IGS 全球电离层地图(GIM)的真实TEC数据替代硬编码Klobuchar系数
 
 多源自动降级:
-  1. IGS Rapid GIM (UWM/波兰) — 24小时延迟, 无需注册
-  2. IGS Final GIM (CDDIS/NASA) — 11天延迟, 无注册
-  3. GLONASS-IAC (俄罗斯) — 近实时
-  4. WHU (武汉大学) — 近实时, 国内
+  1. WHU 武汉大学 IGS Rapid GIM (国内服务器, 2天延迟)
+  2. IGS Rapid GIM (UW-Madison/波兰, 回退)
+
+说明: GLONASS-IAC 无公开近实时真实接口, 已从源列表中移除,
+      不再用 S4/Kp/F10.7 编造 TEC 数值。
+      无真实源时 tec_kunming 输出为 null(不可用), 绝不凑数。
 
 输出: /root/data/fusion/tec_realtime.json
   格式: {ts, source, tec_kunming, lat, lon, validity}
@@ -189,27 +191,18 @@ def fetch_uwm():
     return None
 
 
-# ═══ 源3: GLONASS-IAC (俄罗斯, 暂不实现) ═══
+# ═══ 源3: GLONASS-IAC (俄罗斯) ═══
+# 2026-09-09 修复：GLONASS-IAC 无公开近实时真实接口, 取消伪造声明, 不再实现。
+# 保留函数但明确返回 None, 避免被当作可用源。
 def fetch_glonass():
     return None
 
 
-# ═══ 源4: 已有数据推算 ═══
+# ═══ 已有数据推算 (回退, 但绝不编造) ═══
 def compute_tec_local(s4=None, kp=None, f107=None):
-    """从本地已有数据推算等效TEC (当无外部源时)
-    比纯硬编码好一点: 使用真实的Kp/S4/F10.7输入"""
-    tec_src = {}
-    if s4 is not None and s4 >= 0:
-        tec_src['s4'] = s4 * 100
-    if kp is not None and kp >= 0:
-        tec_src['kp'] = (kp + 1) * 5
-    if f107 is not None and f107 > 0:
-        tec_src['f107'] = f107 * 0.1
-    vals = [v for v in tec_src.values() if v > 0]
-    if vals:
-        tec = sum(vals) / len(vals)
-        return round(tec, 1), 'local_composite', tec_src
-    return None, 'no_local_data', {}
+    """2026-09-09 修复：S4/Kp/F10.7 与 TEC 无线性物理关系, 旧公式纯属编造, 已删除。
+    无真实 TEC 源时一律返回不可用(None), 由调用方写入 null, 不混入真实源数据。"""
+    return None, 'no_real_source', {}
 
 
 def main():
@@ -226,28 +219,26 @@ def main():
         source = 'whu'
 
     # 源2: IGS Rapid GIM (波兰, 回退)
+    # 修复(2026-09-09): 旧代码 r=fetch_uwm() 取到真实数据却没赋值 tec/source,
+    # 导致 UWM 真实源被丢弃, 退化到占位推算。此处正确回填。
     if tec is None:
         r = fetch_uwm()
+        if r:
+            result['sources']['uwm'] = r
+            tec = r['tec']
+            source = 'uwm'
 
-    # 回退: 本地推算
+    # 回退: 本地推算 (2026-09-09 修复：仅作占位, 无真实源必返回 None)
     if tec is None:
-        s4, kp, f107 = None, None, None
-        # 从wentian_latest读已有数据
-        try:
-            wd = json.load(open('/root/data/fusion/wentian_latest.json'))
-            dd = wd.get('data', {})
-            s4 = dd.get('multisrc_s4', {}).get('fused_s4')
-            kp = dd.get('swpc', {}).get('kp')
-            f107 = dd.get('swpc_f107', {}).get('flux_sfu')
-        except Exception:
-            pass
-        tec, source, srcs = compute_tec_local(s4, kp, f107)
+        tec, source, srcs = compute_tec_local()
         result['local_composite'] = srcs
 
     result['tec_kunming'] = tec
     result['lat'] = LAT
     result['lon'] = LON
     result['source'] = source
+    # 2026-09-09 修复：明确标注 TEC 是否可用, 不再用编造值混淆
+    result['validity'] = 'ok' if tec is not None else 'unavailable'
     result['time'] = now.isoformat()
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

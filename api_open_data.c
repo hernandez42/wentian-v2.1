@@ -90,13 +90,18 @@ static int fetch_noaa_kp_1m(double *out_kp, double *out_estimated, char *out_tim
             if (n > 255) n = 255;
             memcpy(snippet, t_end, n);
         }
+        /* 修复(2026-09-09): 旧代码用固定偏移 kp_pos+10 / est_pos+14 直接 atoi/strtod,
+         * 指针落在 ':' 上导致 atoi(":1")/strtod(":0.67") 恒为 0 (太空天气数据造假)。
+         * 正确做法: 定位 ':' 后解析其值。 */
         const char *kp_pos = strstr(snippet, "\"kp_index\"");
         if (kp_pos) {
-            latest_kp = atoi(kp_pos + 10);
+            const char *v = strchr(kp_pos, ':');
+            if (v) latest_kp = atoi(v + 1);
         }
         const char *est_pos = strstr(snippet, "\"estimated_kp\"");
         if (est_pos) {
-            latest_est = strtod(est_pos + 14, NULL);
+            const char *v = strchr(est_pos, ':');
+            if (v) latest_est = strtod(v + 1, NULL);
         }
         p = line_end + 1;
         count++;

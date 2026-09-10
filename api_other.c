@@ -58,6 +58,21 @@ static char *dup_obj(const char *start) {
     return r;
 }
 
+/* 跳过完整JSON对象(含嵌套), 返回匹配'}'之后的指针, 用于正确推进到下一顶层对象
+ * 修复(2026-09-09): 旧代码用 strchr(p, '}') 找首个 '}', 会落在嵌套对象的 '}' 上,
+ * 导致下一轮 strchr(p, '{') 误取嵌套对象 → 事件重复计数/漏解析。 */
+static const char *skip_obj(const char *start) {
+    if (!start || *start != '{') return start ? start + 1 : NULL;
+    int depth = 1;
+    const char *end = start + 1;
+    while (*end && depth > 0) {
+        if (*end == '{') depth++;
+        else if (*end == '}') depth--;
+        end++;
+    }
+    return end;
+}
+
 /* ISO8601 → time_t (无时区则按系统时区) - 公共, 被 wentian.c 也调用 */
 time_t parse_iso(const char *s) {
     if (!s) return 0;
@@ -114,7 +129,8 @@ int wt_aviation_metar(const char *icao, wt_metar_t *out) {
     out->wind_speed_kt = wt_json_int(obj, "wspd", -1);
     char *vis = wt_json_dup(obj, "visib");
     if (vis) {
-        out->visibility_m = atoi(vis);
+        /* AviationWeather visib 单位为英里(statute miles), 换算为米 */
+        out->visibility_m = (int)(atof(vis) * 1609.344 + 0.5);
         free(vis);
     } else {
         out->visibility_m = -1;
@@ -255,7 +271,7 @@ int wt_nasa_donki_list(wt_donki_type_t type, wt_donki_event_t *out, int max) {
         if (!blk) { p++; continue; }
 
         /* 跳过这个完整事件 (到匹配的 '}' 之后) */
-        p = strchr(p, '}');
+        p = skip_obj(p);
         if (p) p++;
 
         wt_donki_event_t *e = &out[count];
@@ -427,8 +443,23 @@ int wt_iss_position(wt_iss_t *out) {
     out->lat = lat_p ? strtod(lat_p, NULL) : NAN;
     out->lon = lon_p ? strtod(lon_p, NULL) : NAN;
     out->ts = (time_t)wt_json_num(json, "timestamp", (double)time(NULL));
-    out->altitude_km = 408;
-    out->velocity_kmh = 27600;
+    /* ⚠ 修复(2026-09-09): altitude_km / velocity_kmh 原为写死常量
+     *   out->altitude_km = 408;  out->velocity_kmh = 27600;
+     * 这是硬代码冒充实时值 — 实测(2026-09-09)真实值为 431.1km / 27548km/h,
+     * 常量与真值相差 23km / 52km/h, 且永远不会变。
+     * open-notify 的 iss-now.json 本身不含高度/速度, 故改由
+     * wheretheiss.at 提供真实值(实测HTTP 200可用); 取不到则置 NAN(不可用),
+     * 绝不用常量顶替。 */
+    out->altitude_km = NAN;
+    out->velocity_kmh = NAN;
+    char *wtia = wt_http_get("https://api.wheretheiss.at/v1/satellites/25544", 10);
+    if (wtia) {
+        double a = wt_json_num(wtia, "altitude", NAN);
+        double v = wt_json_num(wtia, "velocity", NAN);
+        if (!isnan(a)) out->altitude_km = a;
+        if (!isnan(v)) out->velocity_kmh = v;
+        free(wtia);
+    }
     free(json);
     return 0;
 }
@@ -452,7 +483,7 @@ int wt_usgs_quakes_recent(wt_quake_t *out, int max) {
         if (!feat) { p++; continue; }
 
         /* 跳过已处理的feat到匹配的'}'之后 */
-        p = strchr(p, '}');
+        p = skip_obj(p);
         if (p) p++;
 
         wt_quake_t *q = &out[count];

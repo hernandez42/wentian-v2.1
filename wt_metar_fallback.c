@@ -223,17 +223,17 @@ int wt_metar_multisource(const char *icao, wt_metar_fallback_t *best) {
     memset(best, 0, sizeof(*best));
     strcpy(best->icao, icao ? icao : "ZPPP");
 
-    /* 源A: Open-Meteo (最快, 免key) */
-    wt_metar_fallback_t om = {0};
-    if (fetch_openmeteo_metar(&om) == 0 && om.has_data) {
-        memcpy(best, &om, sizeof(*best));
-        return 0;
-    }
-
-    /* 源B: NWS tgftp (原始METAR) */
+    /* 源A: NWS tgftp (真实原始METAR, 权威优先) */
     wt_metar_fallback_t nws = {0};
     if (fetch_nws_tgftp(&nws) == 0 && nws.has_data) {
         memcpy(best, &nws, sizeof(*best));
+        return 0;
+    }
+
+    /* 源B: Open-Meteo ECMWF (合成数据, 仅降级用) */
+    wt_metar_fallback_t om = {0};
+    if (fetch_openmeteo_metar(&om) == 0 && om.has_data) {
+        memcpy(best, &om, sizeof(*best));
         return 0;
     }
 

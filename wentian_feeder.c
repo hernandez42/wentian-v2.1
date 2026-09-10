@@ -88,7 +88,7 @@ static int export_one(sqlite3 *db, FILE *out) {
     fprintf(out, "  \"version\": \"1.1\",\n");
     fprintf(out, "  \"generated_at\": %ld,\n", (long)time(NULL));
     fprintf(out, "  \"source\": \"问天 v1.1 (WenTian Weather Station)\",\n");
-    fprintf(out, "  \"lat\": 25.09917, \"lon\": 102.92667, \"alt\": 2103,\n");
+    fprintf(out, "  \"lat\": %f, \"lon\": %f, \"alt\": %d,\n", WENTIAN_LAT, WENTIAN_LON, WENTIAN_ALT);
     fprintf(out, "  \"data\": {\n");
 
     /* 1. outdoor */
@@ -145,7 +145,7 @@ static int export_one(sqlite3 *db, FILE *out) {
 
     /* 5. metar (取最新ZPPP主) */
     fprintf(out, "    \"metar_zppp\": {\n");
-    if (sqlite3_prepare_v2(db, "SELECT ts,icao,temp,dewpoint,wind_dir,wind_speed,visib,altim FROM metar WHERE icao='ZPPP' ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
+    if (sqlite3_prepare_v2(db, "SELECT ts,icao,temp,dewpoint,wind_dir,wind_speed,visib,altim FROM metar WHERE icao='ZPPP' AND raw NOT LIKE 'SYNTHETIC%%' ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
         && sqlite3_step(st) == SQLITE_ROW) {
         write_kv_int(out, "ts", sqlite3_column_int64(st, 0), 0);
         const unsigned char *icao = sqlite3_column_text(st, 1);
@@ -189,10 +189,10 @@ static int export_one(sqlite3 *db, FILE *out) {
         if (_g >= 0) { fprintf(out, "    \"g_scale\": %ld,\n", _g); }
         long _s = sqlite3_column_int(st, 2);
         if (_s >= 0) { fprintf(out, "    \"s_scale\": %ld,\n", _s); }
+        /* 修复(2026-09-09): 旧逻辑在 _g<0&&_s<0 时重复打印 r_scale 且缺逗号 → 非法JSON,
+         * 推送端 json.loads 崩溃。统一只打印一次。 */
         long _r = sqlite3_column_int(st, 3);
-        if (_r >= 0) { fprintf(out, "    \"r_scale\": %ld\n", _r); } else { fprintf(out, "    \"r_scale\": -1\n"); }
-        // last field needs special handling: if none output, close brace
-        if (_g < 0 && _s < 0) { fprintf(out, "    \"r_scale\": %ld\n", _r); }
+        fprintf(out, "    \"r_scale\": %ld\n", _r);
     }
     sqlite3_finalize(st);
     fprintf(out, "    },\n");
@@ -381,7 +381,7 @@ static int export_one(sqlite3 *db, FILE *out) {
 
     /* 19. 自进化评分 (模块22) — 每个predictor最新一行 */
     fprintf(out, "    \"evolution\": [\n");
-    if (sqlite3_prepare_v2(db, "SELECT ts,predictor,mae_temp,mae_press,total_score,sample_n FROM evolution WHERE rowid IN (SELECT MAX(rowid) FROM evolution GROUP BY predictor) ORDER BY predictor", -1, &st, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, "SELECT ts,predictor,mae_temp,mae_press,total_score,sample_n,note FROM evolution WHERE rowid IN (SELECT MAX(rowid) FROM evolution GROUP BY predictor) ORDER BY predictor", -1, &st, NULL) == SQLITE_OK) {
         int first = 1;
         while (sqlite3_step(st) == SQLITE_ROW) {
             if (!first) fprintf(out, ",\n");
@@ -527,22 +527,42 @@ static int export_one(sqlite3 *db, FILE *out) {
     if (wf) {
         char wbuf[2048];
         size_t wn = fread(wbuf, 1, sizeof(wbuf)-1, wf);
-        fclose(wf);
         if (wn > 0) {
             wbuf[wn] = '\0';
-            /* 摘要daily温度范围 */
+            /* 摘要daily温度范围 (保留原逻辑, 仅预览文件头2KB) */
             const char *sd = strstr(wbuf, "\"summary\":");
             if (sd) {
                 char sum_buf[1024] = {0};
-                /* 取前3天摘要 */
                 const char *d1 = strstr(sd, "2026");
                 if (d1) {
                     snprintf(sum_buf, sizeof(sum_buf), "%.60s...", d1);
                     write_kv_esc(out, "summary_preview", sum_buf, 0);
                 }
             }
-            write_kv_int(out, "hours", wn > 100 ? 360 : 0, 0);
         }
+        /* 2026-09-09 修复: 真实预报时长 = 实际预报点数(每个点含一个
+           "temperature_2m"), 不再按文件>100字节捏造360。
+           读不到真实点数则写0(未知), 绝不编造。 */
+        long wn_hours = 0;
+        fseek(wf, 0, SEEK_END);
+        long fsz = ftell(wf);
+        rewind(wf);
+        if (fsz > 0) {
+            char *wbig = (char *)malloc((size_t)fsz + 1);
+            if (wbig) {
+                size_t got = fread(wbig, 1, (size_t)fsz, wf);
+                wbig[got] = '\0';
+                const char *key = "\"temperature_2m\"";
+                const char *p = wbig;
+                while ((p = strstr(p, key)) != NULL) {
+                    wn_hours++;
+                    p += strlen(key);
+                }
+                free(wbig);
+            }
+        }
+        fclose(wf);
+        write_kv_int(out, "hours", wn_hours, 0);
     }
     write_kv_esc(out, "model", "google_weathernext2+graphcast", 1);
     fprintf(out, "    },\n");  /* weathernext, 后面还有tec_realtime */

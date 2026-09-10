@@ -41,11 +41,9 @@
 #define MULTISRC_JSON "/root/data/fusion/multisrc_fusion.json"
 
 /* ── 数据源权重 (主人在ENSO大考版校准) ──────────────────── */
-#define W_SDR         0.30  /* SDR扫频 (室外视角, 最重) */
-#define W_GNSS_UART   0.25  /* ATGM336H串口SNR (室内, 第二) */
-#define W_OPENMETEO   0.20  /* Open-Meteo TEC */
-#define W_SCINTPI     0.15  /* ScintPi互联网公开S4 */
-#define W_UNO         0.10  /* UNO气压突变 (间接, 仅辅助) */
+/* 2026-09-09 修复: 原 W_SDR/W_GNSS_UART/W_OPENMETEO/W_SCINTPI/W_UNO 宏
+   从未被使用, 且与下方实际生效的 weights[] 数值不一致(会误导读者)。
+   实际生效权重以 weights[] 为准, 故删除这些未使用宏, 不改变真实权重。 */
 
 /* ── S4阈值 (国际标准) ──────────────────────────────────── */
 static const char *s4_level_class(double s4) {
@@ -143,9 +141,9 @@ static double multisrc_uno_pressure_delta(void) {
     double recent = 0;
     for (int i = 0; i < 10; i++) recent += vals[i];
     recent /= 10;
-    double old = 0;
-    for (int i = 25; i < 35 && i < n; i++) old += vals[i];
-    old /= 10;
+    double old = 0; int oc = 0;
+    for (int i = 25; i < 35 && i < n; i++) { old += vals[i]; oc++; }
+    if (oc > 0) old /= oc;   /* 按实际样本数求均, 避免 n<35 时固定÷10 虚高 ΔP */
 
     return recent - old;  /* hPa 正=气压升(冷锋), 负=气压降(雷暴) */
 }
@@ -166,7 +164,9 @@ int wt_multisrc_run(void) {
     double s4_openmeteo = (kp >= 0 && kp <= 9) ? (kp * 0.06) : -1.0;
 
     /* UNO 气压30min变化 → 间接S4 (经验关联) */
-    double s4_uno = (dp_30min > -0.5 && fabs(dp_30min) > 0.5) ? (fabs(dp_30min) / 7.5) : -1.0;
+    /* 修复(2026-09-09): 旧条件 dp_30min>-0.5 把气压骤降(dp_30min<=-0.5, 雷暴前兆)排除在外。
+     * 改为只看 |ΔP|>0.5, 气压升/降都计入。 */
+    double s4_uno = (fabs(dp_30min) > 0.5) ? (fabs(dp_30min) / 7.5) : -1.0;
 
     printf("  ── 有效源 ──\n");
     printf("    [实测] GNSS串口 S4=%.3f | 平均SNR=%.1fdB\n",

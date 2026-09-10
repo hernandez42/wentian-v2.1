@@ -17,16 +17,31 @@ def rm(ra):
  for n,s,e in LM:
   if s<=r<e:return n,s,e
  return '角',0,12
+# 2026-09-09 修复：真实太阳视黄经(考虑轨道偏心率), NOAA低精度算法, 误差<0.01°
+def solar_apparent_longitude(dt):
+ f=(dt.hour+(dt.minute+(dt.second+dt.microsecond*1e-6)/60)/60)/24.0
+ y,m=dt.year,dt.month;d=dt.day+f
+ if m<=2:y-=1;m+=12
+ a=y//100;b=2-a+a//4
+ jd=int(365.25*(y+4716))+int(30.6001*(m+1))+d+b-1524.5
+ t=(jd-2451545.0)/36525.0
+ L0=280.46646+36000.76983*t+0.0003032*t*t
+ M=357.52911+35999.05029*t-0.0001537*t*t
+ Mr=math.radians(M)
+ C=(math.sin(Mr)*(1.914602-0.004817*t-0.000014*t*t)
+    +math.sin(2*Mr)*(0.019993-0.000101*t)
+    +math.sin(3*Mr)*0.000289)
+ true_lon=L0+C
+ om=125.04-1934.136*t
+ return (true_lon-0.00569-0.00478*math.sin(math.radians(om)))%360.0
 def sun(dt):
- d=dt.timetuple().tm_yday;sl=(d-80)*360/365.25
- while sl<0:sl+=360
- while sl>=360:sl-=360
+ sl=solar_apparent_longitude(dt)
  ob=23.44;sd=math.degrees(math.asin(math.sin(math.radians(ob))*math.sin(math.radians(sl))))
  m,_,_=rm(sl);return {'ra_deg':round(sl,1),'dec_deg':round(sd,1),'sun_lon_deg':round(sl,1),'mansion':m,'note':f'日在{m}宿'}
 def moon(dt):
  import math
  rf=datetime(2026,1,1);dy=(dt-rf).total_seconds()/86400;ml=(dy*13.176+180)%360
- m,_,_=rm(ml);sl=((dt.timetuple().tm_yday-80)*360/365.25)%360;ph=(ml-sl)%360
+ m,_,_=rm(ml);sl=solar_apparent_longitude(dt);ph=(ml-sl)%360
  if ph<45 or ph>=315:pn,pe='朔(新月)','🌑'
  elif ph<90:pn,pe='蛾眉月','🌒'
  elif ph<135:pn,pe='上弦月','🌓'
@@ -65,14 +80,13 @@ def run():
  dy=n.timetuple().tm_yday
  tm=['立春','雨水','惊蛰','春分','清明','谷雨','立夏','小满','芒种','夏至','小暑','大暑',
      '立秋','处暑','白露','秋分','寒露','霜降','立冬','小雪','大雪','冬至','小寒','大寒']
- sl=(dy-80)*360/365.25
- sl=sl%360
+ sl=solar_apparent_longitude(datetime.utcnow())  # 修复: 太阳视黄经须用UTC, 用本地时(UTC+8)偏~0.33°, 节气/日月位置误判
  nml=(sl-315+360)%360
  ti=max(0,min(23,int(nml/15)))
  out={'ts':ts,'time':n.strftime('%Y-%m-%d %H:%M:%S'),'location':'昆明长水机场(25.09917°N,102.92667°E)',
       'solar_term':{'current':tm[ti],'index':ti},'sun':s,'moon':m,'planets':p,
       'celestial_assessment':ov,'anomalies':a,
-      'scientific':{'temperature_c':round(t,1) if t else None,'kp_index':k,'s4':round(sv,3) if sv else None,'avg_gps_24h':g,'avg_bds_24h':b},
+      'scientific':{'temperature_c':round(t,1) if t is not None else None,'kp_index':k,'s4':round(sv,3) if sv is not None else None,'avg_gps_24h':g,'avg_bds_24h':b},
       'version':'星象 v1.0'}
  with open(os.path.join(OD,'astral.json'),'w',encoding='utf-8') as f:json.dump(out,f,ensure_ascii=False,indent=2)
  dl=os.path.join(LD,f'{n.strftime("%Y%m%d")}.json')

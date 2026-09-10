@@ -298,12 +298,23 @@ int wt_radar_correlate(wt_radar_correl_t *out, time_t ts, int window_min) {
     /* 4. 模式匹配 (基于"谁触发"而非相关系数) */
     out->matched_pattern = match_pattern(out);
 
-    /* 5. 置信度: 基于有效源数 + 模式匹配一致性 */
-    int n_active = (sdr_ok ? 1 : 0) + (gnss_ok ? 1 : 0) + (uno_ok ? 1 : 0);
-    out->confidence = (n_active >= 2 && out->matched_pattern != WT_PATTERN_UNKNOWN) ? 0.6 : 0.2;
-    if (n_active >= 3 && out->matched_pattern != WT_PATTERN_UNKNOWN) out->confidence = 0.8;
-    /* coherence保留为历史兼容(不再用于置信度计算) */
-    out->coherence = out->confidence;
+    /* ⚠ 修复(2026-09-09): 置信度由"按有效源数查表"改为真实一致性度量。
+     * 旧实现: n_active>=3?0.8 : (n_active>=2?0.6 : 0.2) — 三个写死常量,
+     *   与"各源是否真的互相印证"无关, 属捏造数值, 且会被 push_alert 以
+     *   "置信80%"的形式推给用户。
+     * 新实现:
+     *   agreement = 报异常的独立源数 / 有效源数  → 跨源异常一致率(真实计算)
+     *   factor    = 模式明确 1.0 / 模式未知 0.5  → 有无模式级证据
+     *   例: 3源中2源异常+明确模式 → 0.667; 3源0异常 → 0.0(无证据支持预警)
+     * 注意: 这里统计的是"异常指示位"的一致率(离散、可解释),
+     *   不再使用 corr_*(跨物理量逐元素相关, 无物理意义, 见下方说明)。 */
+    int n_avail = (sdr_ok ? 1 : 0) + (gnss_ok ? 1 : 0) + (uno_ok ? 1 : 0);
+    int n_anom  = (out->sdr_active ? 1 : 0) + (out->gnss_anomaly ? 1 : 0) +
+                  ((out->uno_pressure || out->uno_temp) ? 1 : 0);
+    double agreement = (n_avail > 0) ? (double)n_anom / (double)n_avail : 0.0;
+    double factor = (out->matched_pattern != WT_PATTERN_UNKNOWN) ? 1.0 : 0.5;
+    out->coherence  = agreement;            /* 跨源异常一致率 */
+    out->confidence = agreement * factor;   /* 综合证据强度 */
 
     /* 命名 */
     const char *names[] = { "UNKNOWN", "THUNDER", "SQUALL", "FALSE_COLD", "STATIONARY", "WIND_SHEAR" };

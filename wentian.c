@@ -163,12 +163,11 @@ int wentian_collect_all(void) {
     int ok = 0, fail = 0;
     kf_init_once();
 
-    printf("\n━━━ 1. Open-Meteo 室外气象权威 ━━━\n");
+    printf("\n━━━ 1. 室外气象权威 ━━━\n");
     wt_outdoor_t outdoor = {0};
-    int om_ok = (wt_openmeteo_current(&outdoor) == 0);
-    if (!om_ok) {
-        /* 1+1 主备: Open-Meteo失败→met.no后备 */
-        printf("  ⚠ Open-Meteo失败, 尝试 met.no 备用...\n");
+    int om_ok = 0;
+    /* 主源: met.no (挪威气象局, 免费开源, 数据质量公认) → wttr.in(备2) → Open-Meteo(末备) */
+    {
         double mn_t = NAN, mn_h = NAN, mn_p = NAN, mn_w = NAN;
         char mn_s[64] = {0};
         if (fetch_metno(&mn_t, &mn_h, &mn_p, &mn_w, mn_s, sizeof(mn_s)) == 0) {
@@ -179,20 +178,29 @@ int wentian_collect_all(void) {
             if (!isnan(mn_w)) { outdoor.wind_speed = mn_w; }
             strncpy(outdoor.weather_text, mn_s, sizeof(outdoor.weather_text)-1);
             om_ok = 1;
-            printf("  ✅ [备] met.no T=%.1f°C H=%.0f%% P=%.0fhPa\n",
-                   mn_t, mn_h, mn_p);
-        } else {
-            /* 再试 wttr.in 三级备用 */
-            double wt_t = NAN, wt_h = NAN;
-            char wt_d[64] = {0};
-            if (fetch_wttr(&wt_t, &wt_h, wt_d, sizeof(wt_d)) == 0) {
-                outdoor.fetched_at = time(NULL);
-                if (!isnan(wt_t)) outdoor.temperature = wt_t;
-                if (!isnan(wt_h)) outdoor.humidity = wt_h;
-                strncpy(outdoor.weather_text, wt_d, sizeof(outdoor.weather_text)-1);
-                om_ok = 1;
-                printf("  ✅ [备2] wttr.in T=%.1f°C H=%.0f%%\n", wt_t, wt_h);
-            }
+            printf("  ✅ [主] met.no T=%.1f°C H=%.0f%% P=%.0fhPa 风=%.0fkm/h %s\n",
+                   mn_t, mn_h, mn_p, mn_w, mn_s);
+        }
+    }
+    if (!om_ok) {
+        /* 备2: wttr.in (METAR观测数据) */
+        double wt_t = NAN, wt_h = NAN;
+        char wt_d[64] = {0};
+        if (fetch_wttr(&wt_t, &wt_h, wt_d, sizeof(wt_d)) == 0) {
+            outdoor.fetched_at = time(NULL);
+            if (!isnan(wt_t)) outdoor.temperature = wt_t;
+            if (!isnan(wt_h)) outdoor.humidity = wt_h;
+            strncpy(outdoor.weather_text, wt_d, sizeof(outdoor.weather_text)-1);
+            om_ok = 1;
+            printf("  ✅ [备] wttr.in T=%.1f°C H=%.0f%% %s\n", wt_t, wt_h, wt_d);
+        }
+    }
+    if (!om_ok) {
+        /* 末备: Open-Meteo (有假数据历史, 仅兜底) */
+        if (wt_openmeteo_current(&outdoor) == 0) {
+            om_ok = 1;
+            printf("  ✅ [末] Open-Meteo T=%.1f°C H=%.0f%% P=%.1fhPa 天气:%s\n",
+                outdoor.temperature, outdoor.humidity, outdoor.pressure_msl, outdoor.weather_text);
         }
     }
     if (om_ok) {
@@ -362,8 +370,14 @@ int wentian_collect_all(void) {
     printf("\n━━━ 9. ISS 国际空间站 ━━━\n");
     wt_iss_t iss = {0};
     if (wt_iss_position(&iss) == 0) {
-        printf("  ✅ ISS 位置: 纬度%.2f° 经度%.2f° 高度%.0fkm\n",
-            iss.lat, iss.lon, iss.altitude_km);
+        /* ⚠ 修复(2026-09-09): 高度改为真实获取(wheretheiss.at), 取不到时为NAN。
+         * 旧代码无条件打印写死的408km, 让它看起来像实测值 — 现缺失时诚实显示不可用。 */
+        if (!isnan(iss.altitude_km))
+            printf("  ✅ ISS 位置: 纬度%.2f° 经度%.2f° 高度%.1fkm 速度%.0fkm/h\n",
+                iss.lat, iss.lon, iss.altitude_km, isnan(iss.velocity_kmh) ? NAN : iss.velocity_kmh);
+        else
+            printf("  ✅ ISS 位置: 纬度%.2f° 经度%.2f° 高度不可用(真实源无返回)\n",
+                iss.lat, iss.lon);
         wt_db_save_iss(&iss);
         ok++;
     } else fail++;
@@ -502,7 +516,7 @@ int wentian_collect_all(void) {
                 int n = 0;
                 while (sqlite3_step(st_c) == SQLITE_ROW && n < 3) {
                     const char *b = (const char*)sqlite3_column_text(st_c, 1);
-                    strncpy(sdr_peaks[n].band, b ? b : "?", sizeof(sdr_peaks[n].band)-1);
+                    snprintf(sdr_peaks[n].band, sizeof(sdr_peaks[n].band), "%s", b ? b : "?");
                     sdr_peaks[n].peak_freq_mhz = sqlite3_column_double(st_c, 3);
                     sdr_peaks[n].peak_dbm = sqlite3_column_double(st_c, 4);
                     sdr_peaks[n].peak_snr = sqlite3_column_double(st_c, 5);
@@ -631,11 +645,11 @@ int wentian_collect_all(void) {
         (void)rc;
     }
 
-    /* ═══ 28. 更新维度计数器 (钦天监特征已读入) ═══════ */
+    /* ═══ 维度计数器 (钦天监特征已读入) ═══════ */
     ok++;  /* 钦天监算一个维度 */
 
-    printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (28模块)\n", ok, fail);
-    printf("  17开放API + 4本地硬件 + 1Kalman融合 + 1PWV反演 + 1电离层 + 1相干雷达 + 1多源预测 + 1自进化 + 1多源融合 + 4开源API + 1自愈 + 1TEC + 1钦天监+ROTI = 36 维度\n\n");
+    printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (共 %d 模块已编排)\n", ok, fail, ok + fail);
+    printf("  实际加载模块数随 API 可用性与本地硬件动态变化，已去除固定硬编码计数。\n\n");
     return 0;
 }
 

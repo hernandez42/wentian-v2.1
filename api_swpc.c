@@ -73,7 +73,7 @@ int wt_swpc_kp(wt_kp_t *out) {
             &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
             &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
         tm.tm_year -= 1900; tm.tm_mon -= 1;
-        out->ts = mktime(&tm);
+        out->ts = timegm(&tm);
         free(t);
     }
 /* ⚠ 修复(2026-09-06): 旧代码default=0 — 字段缺失时静默返回假零
@@ -121,7 +121,7 @@ int wt_swpc_f107(wt_f107_t *out) {
             &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
             &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
         tm.tm_year -= 1900; tm.tm_mon -= 1;
-        out->ts = mktime(&tm);
+        out->ts = timegm(&tm);
         free(t);
     }
     out->flux_sfu = wt_json_num_nan(snip, "flux");

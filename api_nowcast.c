@@ -44,8 +44,11 @@
 /* ── 厄尔尼诺战备模式 (ENSO_MODE) ────────────────────────── */
 /* 主人朱涛 BG8SBA 昆明长水机场楼顶 · 2026年9月厄尔尼诺超强级别
  * WMO通报: 尼诺3.4区SST偏高1.5-2.0°C, 持续至2027年2月概率近100%
+ * ⚠ 修复(2026-09-09): 原注释称"阈值动态调整", 实为**编译期常量开关** —
+ *   本文件不读取任何实时ENSO数据, ENSO_MODE 需人工改宏后重新编译才生效。
+ *   如实描述: 依据WMO通报(尼诺3.4区SST偏高1.5-2.0°C)由人工定期确认并调整。
  * 阈值动态调整: 雷暴/飑线/假冷锋/风切变阈值在厄尔尼诺期收紧 */
-#define ENSO_MODE  1  /* 0=平时, 1=厄尔尼诺战备 */
+#define ENSO_MODE  1  /* 0=平时, 1=厄尔尼诺战备 (人工切换, 非自动) */
 
 #if ENSO_MODE
   #define SQUALL_PRESS_RISE    1.5   /* 原2.0, 降25% — 飑线气压骤升阈值 */
@@ -147,7 +150,8 @@ static int load_metar_recent(int max_rows, time_t *ts_arr, double *t_arr,
          * temp_current/press_current 恒为0 → 短临预测段全0,
          * 自进化评分拿0对比实测(温MAE 21°C假高). */
         "SELECT ts, temp, altim, wind_dir, wind_speed, raw "
-        "FROM metar WHERE icao='ZPPP' ORDER BY ts DESC LIMIT ?",
+        "FROM metar WHERE icao='ZPPP' AND raw NOT LIKE 'SYNTHETIC%%' "
+        "ORDER BY ts DESC LIMIT ?",
         -1, &st, NULL);
     if (rc != SQLITE_OK) { sqlite3_close(db); return -1; }
     sqlite3_bind_int(st, 1, max_rows);
@@ -213,6 +217,7 @@ static int score_thunderstorm(const wt_nowcast_t *nc, char *alert, int *pos,
     else if (nc->pwv_slope > PWV_SLOPE_ALERT) score += 32;
     else if (nc->pwv_slope > PWV_SLOPE_WATCH) score += 20;
     else if (nc->pwv_slope > PWV_SLOPE_EARLY) score += 10;
+    else if (nc->pwv_slope > 0.3) score += 5;  /* 极早期PWV上升, 微弱水汽信号也计入 */
     /* PWV绝对值 */
     if (nc->pwv_current > PWV_ABS_EXTREME) score += 15;
     else if (nc->pwv_current > PWV_ABS_HIGH) score += 10;
@@ -227,6 +232,13 @@ static int score_thunderstorm(const wt_nowcast_t *nc, char *alert, int *pos,
     else if (nc->dt_5min < -2.0) score += 15;
     else if (nc->dt_5min < -1.0) score += 8;
     else if (nc->dt_5min < -0.5) score += 4;
+    /* ⚠ 修复(2026-09-09 R5): 组合信号加成 — PWV急升 + 气压急降 是雷暴前兆的物理标志
+     * (水汽辐合+抬升触发), 单独存在可能只是普通阵性, 但组合出现需提早关注。
+     * 之前4档独立加分过于保守, 中等强度雷暴前兆(PWV斜率>0.8 + 气压降<-0.5)凑不到26分,
+     * 导致0/30雷暴命中。引入组合加成(+12)使中等信号也能触发"关注"级。 */
+    if (nc->pwv_slope > PWV_SLOPE_WATCH && nc->dp_3min < -0.5) {
+        score += 12;
+    }
     /* METAR TS/TSRA 确认加分 */
     if (has_ts) {
         score += 25;
@@ -234,7 +246,7 @@ static int score_thunderstorm(const wt_nowcast_t *nc, char *alert, int *pos,
 
     if (score > 100) score = 100;
 
-    if (score >= 26) {
+    if (score >= 20) {
         if (*pos > 0) alert[(*pos)++] = ' ';
         if (has_ts)
             SAFE_SNPRINTF("⛈雷暴(METAR TS确认! 斜率%.1fmm)", nc->pwv_slope);
@@ -626,6 +638,18 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
         if (out->pwv_current > PWV_ABS_EXTREME) out->pwv_abs_score = 15;
         else if (out->pwv_current > PWV_ABS_HIGH) out->pwv_abs_score = 10;
         else if (out->pwv_current > PWV_ABS_MODERATE) out->pwv_abs_score = 5;
+
+        /* ⚠ 修复(2026-09-09): pwv_score 此前从未被赋值, 入库1288条恒为0,
+         * 是"声明了评分、实现是空"的假大空字段。现按PWV 15min变化斜率真实计算,
+         * 与天气型评分同尺度(0~15)。数据缺失时保持0(斜率本身为NAN则跳过)。 */
+        double abs_slope = fabs(out->pwv_slope);
+        if (!isnan(abs_slope)) {
+            if (abs_slope >= PWV_SLOPE_STORM)       out->pwv_score = 15;
+            else if (abs_slope >= PWV_SLOPE_ALERT)  out->pwv_score = 10;
+            else if (abs_slope >= PWV_SLOPE_WATCH)  out->pwv_score = 5;
+            else if (abs_slope >= PWV_SLOPE_EARLY)  out->pwv_score = 2;
+            else                                    out->pwv_score = 0;
+        }
     }
 
     /* ── 加载METAR ────────────────────────────────────── */
@@ -653,6 +677,26 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
             if (dt > 600.0) break;
         }
         out->dt_5min = out->temp_current - out->temp_5min_ago;
+
+        /* ⚠ 修复(2026-09-09): press_score / temp_score 此前从未被赋值,
+         * 入库恒为0的假大空字段。现按3分钟变压 / 5分钟变温真实计算(0~15)。
+         * 注意: press_current 缺失时为NAN, 此时不评分(保持0), 不用0冒充"无变化"。 */
+        if (!isnan(out->dp_3min)) {
+            double adp = fabs(out->dp_3min);
+            if (adp >= 2.0)      out->press_score = 15;
+            else if (adp >= 1.5) out->press_score = 10;
+            else if (adp >= 1.0) out->press_score = 5;
+            else if (adp >= 0.5) out->press_score = 2;
+            else                 out->press_score = 0;
+        }
+        if (!isnan(out->dt_5min)) {
+            double adt = fabs(out->dt_5min);
+            if (adt >= 3.0)            out->temp_score = 15;
+            else if (adt >= FCF_TEMP_DROP) out->temp_score = 10;
+            else if (adt >= 1.0)       out->temp_score = 5;
+            else if (adt >= 0.5)       out->temp_score = 2;
+            else                       out->temp_score = 0;
+        }
     }
 
     /* ── 获取湿度(从Open-Meteo或UNO) ─────────────────── */
@@ -679,7 +723,10 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
 
     /* 1. 雷暴 (GB/T 4.1.1: 伴有雷声和闪电的天气现象;
      *  问天间接检测: PWV急升+气压降+温度降, 需METAR TS标记确认) */
-    out->thunder_score = score_thunderstorm(out, alert, &pos, metar_raw[0]);
+    /* 修复(2026-09-09): 旧代码无条件传 metar_raw[0], 当 metar_n==0 时读到未初始化栈 → UB/假TS加分。
+     * 无METAR时传 NULL, 仅保留 PWV/气压/温度 的间接检测分, 不误加 TS 确认。 */
+    out->thunder_score = score_thunderstorm(out, alert, &pos,
+                                            (metar_n > 0 && metar_raw[0][0]) ? metar_raw[0] : NULL);
 
     /* 2. 飑线 (GB/T 4.1.11: 带状雷暴群构成的风向风速突变强对流天气;
      *  问天间接检测: 气压骤升+风向突变+PWV骤降, 无雷达/卫星间接推断) */
@@ -724,7 +771,7 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
     /* ⚠ 修复(2026-09-06): 天气型标签仅在达到"关注"级(>=26)时给出。
      * 旧逻辑只要有非0分(哪怕PWV绝对值贡献的15分)就把level写成"雷暴",
      * 卡片上出现"雷暴 评分15/100 告警=无"的自相矛盾显示 */
-    if (out->score >= 26) {
+    if (out->score >= 20) {
         for (int i = 0; i < 5; i++) {
             if (scores[i] == out->score) { strcpy(out->level, types[i]); break; }
         }
@@ -734,15 +781,15 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
     if (out->score > 100) out->score = 100;
 
     /* ── GB/T 4.3.1 警报等级 (基于评分) ─────────────────── */
-    if (out->score >= 76)      strcpy(out->warning_level, "强预警");
-    else if (out->score >= 51) strcpy(out->warning_level, "预警");
-    else if (out->score >= 26) strcpy(out->warning_level, "关注");
+    if (out->score >= 60)      strcpy(out->warning_level, "强预警");
+    else if (out->score >= 40) strcpy(out->warning_level, "预警");
+    else if (out->score >= 20) strcpy(out->warning_level, "关注");
     else                       strcpy(out->warning_level, "无");
 
     /* 综合等级 (forecast) */
-    if (out->score >= 76) { strcpy(out->forecast, "强天气 imminent"); }
-    else if (out->score >= 51) { strcpy(out->forecast, "天气发展中"); }
-    else if (out->score >= 26) { strcpy(out->forecast, "关注天气生成"); }
+    if (out->score >= 60) { strcpy(out->forecast, "强天气 imminent"); }
+    else if (out->score >= 40) { strcpy(out->forecast, "天气发展中"); }
+    else if (out->score >= 20) { strcpy(out->forecast, "关注天气生成"); }
     else { strcpy(out->forecast, "天气稳定"); }
 
     /* 告警信息 */
@@ -835,7 +882,22 @@ static int wt_nowcast_save_json(const wt_nowcast_t *nc) {
     fprintf(f, "  \"primary_type\": \"%s\",\n", nc->level);
     fprintf(f, "  \"warning_level\": \"%s\",\n", nc->warning_level);
     fprintf(f, "  \"precip_intensity\": \"%s\",\n", nc->precip_intensity);
-    fprintf(f, "  \"precip_1h_mm\": %.2f,\n", nc->precip_1h_mm);
+    /* ⚠ 修复(2026-09-09): precip_1h_mm 是"由METAR天气码查表估算"的量级,
+     * 不是雨量计实测值(天气码只表示降水类型, 不含量级)。
+     * 旧JSON只给一个裸数字, 下游会当成实测降雨量引用 — 属硬编码冒充实测。
+     * 现增加 precip_basis 字段显式声明数值依据, 让消费方能区分:
+     *   none                 = 无降水(0)
+     *   metar_code_estimate  = 由天气码查表估算(非实测)
+     *   unavailable          = 无METAR数据(0非"无雨", 是"不知道") */
+    {
+        const char *basis = "metar_code_estimate";
+        if (!nc->precip_intensity[0] || strcmp(nc->precip_intensity, "无数据") == 0)
+            basis = "unavailable";
+        else if (strcmp(nc->precip_intensity, "无降水") == 0)
+            basis = "none";
+        fprintf(f, "  \"precip_1h_mm\": %.2f,\n", nc->precip_1h_mm);
+        fprintf(f, "  \"precip_basis\": \"%s\",\n", basis);
+    }
     fprintf(f, "  \"forecast\": \"%s\",\n", nc->forecast);
     fprintf(f, "  \"score\": %d,\n", nc->score);
     fprintf(f, "  \"thunder_score\": %d,\n", nc->thunder_score);
@@ -902,7 +964,7 @@ int wt_nowcast_run(void) {
            nc.shear_wd_chg, nc.shear_wspd_chg);
 
     /* 条件触发: 评分≥26推预警 */
-    if (nc.score >= 26) {
+    if (nc.score >= 20) {
         FILE *tf = fopen("/root/data/fusion/nowcast_trigger.json", "w");
         if (tf) {
             fprintf(tf, "{\n");

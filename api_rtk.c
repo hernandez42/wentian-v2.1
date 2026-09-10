@@ -38,7 +38,9 @@ int wt_rtk_from_nmea(const char *nmea_line, wt_rtk_t *out) {
         char mode[2] = {0};
         double lat = 0, lon = 0;
         char ns = '\0', ew = '\0';
-        if (sscanf(gga, "RMC%*[^,],%1[AaVv],%lf,%c,%lf,%c",
+        /* 修复(2026-09-09): 旧格式 "RMC%*[^,],..." 中 %*[^,] 停在逗号,
+         * 后续 %lf 直接吃到逗号 → 解析恒失败。改为显式逗号分隔 + 跳过 time 字段。 */
+        if (sscanf(gga, "RMC,%*[^,],%1[AaVv],%lf,%c,%lf,%c",
                    mode, &lat, &ns, &lon, &ew) < 5) return -1;
         if (mode[0] != 'A' && mode[0] != 'a') { out->fix_type = 0; return 0; }
         /* 度分 → 十进制度 */
@@ -58,12 +60,16 @@ int wt_rtk_from_nmea(const char *nmea_line, wt_rtk_t *out) {
     int n_sats = 0;
     double hdop = 0;
 
-    if (sscanf(gga, "GGA%*[^,],%*[^,],%lf,%c,%lf,%c,%d,%d,%lf,%lf,%lf",
+    /* 修复(2026-09-09): 旧格式多跳一个字段(连跳 time+lat), 把 N/S 字母当 double 读 → 恒失败;
+     * 且 %c 会吃到逗号。改为显式逗号分隔, 仅跳过 time 后依次读 lat,ns,lon,ew,qual,sats,hdop,alt,geoid。 */
+    if (sscanf(gga, "GGA,%*[^,],%lf,%c,%lf,%c,%d,%d,%lf,%lf,%lf",
                &lat, &ns, &lon, &ew, &fix_q, &n_sats, &hdop, &alt_msl, &geoid) < 9) {
         return -1;
     }
 
-    out->fix_type = (fix_q == 0) ? 0 : ((fix_q == 4 || fix_q == 5) ? 1 : 2);
+    /* fix_type 语义: 0=无效, 1=单点GPS/DGPS, 2=RTK(FIXED/float, 最优)。
+     * 旧代码把 RTK(4/5) 映射到 1、单点映射到 2, 导致 RTK 被降级。修正如下。 */
+    out->fix_type = (fix_q == 0) ? 0 : ((fix_q == 4 || fix_q == 5) ? 2 : 1);
     out->n_sats = n_sats;
 
     /* 度分 → 十进制度 */
@@ -145,21 +151,23 @@ int wt_rtk_solve(wt_rtk_t *out, const char *base_correction_url) {
  *   smooth_lon = wt_kf_smooth_lon(&kf_lon, raw_lon);
  *   smooth_alt = wt_kf_smooth_alt(&kf_alt, raw_alt);
  */
+/* 2026-09-09 修复: 原实现把 f->last_value(上一帧估计)回喂 Kalman, 等于
+   忽略新观测, 失去滤波意义。改为把本次新观测 raw 喂入 kf1d_update。 */
 double wt_kf_smooth_lat(wt_kf_filter_t *f, double raw) {
-    if (f->n_obs < 3) f->last_value = raw;
-    f->last_value = kf1d_update(&f->kf, f->last_value);
+    if (f->n_obs < 3) f->last_value = raw;  /* 前3次用观测直接初始化 */
+    f->last_value = kf1d_update(&f->kf, raw);
     f->n_obs++;
     return f->kf.x;
 }
 double wt_kf_smooth_lon(wt_kf_filter_t *f, double raw) {
     if (f->n_obs < 3) f->last_value = raw;
-    f->last_value = kf1d_update(&f->kf, f->last_value);
+    f->last_value = kf1d_update(&f->kf, raw);
     f->n_obs++;
     return f->kf.x;
 }
 double wt_kf_smooth_alt(wt_kf_filter_t *f, double raw) {
     if (f->n_obs < 3) f->last_value = raw;
-    f->last_value = kf1d_update(&f->kf, f->last_value);
+    f->last_value = kf1d_update(&f->kf, raw);
     f->n_obs++;
     return f->kf.x;
 }

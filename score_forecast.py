@@ -86,22 +86,62 @@ def save_score_db(db):
         json.dump(db, f, indent=2, ensure_ascii=False)
 
 # ── 读取所有预测源 ────────────────────────────────────────
+FORECAST_MAX_AGE_SEC = 24 * 3600   # 超过24h的预测文件视为陈旧, 不参与评分
+WEATHERNEXT_JSON     = '/root/data/fusion/weathernext_forecast.json'  # WeatherNext 主模型, 主人架构指定
+
+def _weathernext_to_forecast(data: dict):
+    """将 weathernext_forecast.json 标准化为 forecast_1h/3h/6h 结构,
+    使其可直接进入通用评分管道 (T=温度, P=MSL气压 — 无需站点换算)"""
+    hours = data.get('forecast_hours', [])
+    if not hours:
+        return None
+    out = {}
+    for lead_h, idx in [('1h', 1), ('3h', 3), ('6h', 6)]:
+        # idx=0是当前, 1/3/6 索引即代表未来第1/3/6小时
+        if len(hours) > idx:
+            h = hours[idx]
+            out[f'forecast_{lead_h}h'] = {
+                'T': h.get('temperature_2m'),
+                'P': h.get('pressure_msl_hpa'),  # WeatherNext 输出即 MSL, 不需换算
+                'H': h.get('relative_humidity_pct'),
+            }
+    return out
+
 def load_all_forecasts():
-    """从所有预测JSON读取当前预报"""
+    """从所有预测JSON读取当前预报 (过滤>24h陈旧文件, 避免污染评分;
+    并将 WeatherNext 主模型纳入主评分源)"""
     forecasts = {}
-    for path in FORECAST_JSONS:
-        if os.path.exists(path):
-            try:
-                with open(path) as f:
-                    data = json.load(f)
-                name = os.path.basename(path).replace('.json', '')
-                forecasts[name] = {
-                    'source': name,
-                    'data': data,
-                    'record_ts': int(datetime.now().timestamp()),
-                }
-            except Exception as e:
-                print(f'[score] ⚠ 读取{path}失败: {e}')
+    now_ts = int(datetime.now().timestamp())
+    paths = list(FORECAST_JSONS) + [WEATHERNEXT_JSON]
+    seen = set()
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        if not os.path.exists(path):
+            continue
+        try:
+            age = now_ts - int(os.path.getmtime(path))
+            if age > FORECAST_MAX_AGE_SEC:
+                # 静默跳过陈旧文件(已无价值, 反复打印会刷屏)
+                continue
+            with open(path) as f:
+                data = json.load(f)
+            name = os.path.basename(path).replace('.json', '')
+            if name == 'weathernext_forecast' and 'forecast_hours' in data:
+                data = _weathernext_to_forecast(data)
+                if not data:
+                    continue
+                name = 'weathernext'  # 标准化来源名
+            elif name == 'weathernext_forecast':
+                continue
+            forecasts[name] = {
+                'source': name,
+                'data': data,
+                'record_ts': int(datetime.now().timestamp()),
+            }
+        except Exception as e:
+            print(f'[score] ⚠ 读取{path}失败: {e}')
     return forecasts
 
 # ── METAR实测查询 ─────────────────────────────────────────
@@ -181,6 +221,11 @@ def do_evaluate():
         if fc.get('_evaluated'):
             continue
         record_ts = fc.get('record_ts', 0)
+        # ⚠ 修复(2026-09-09 R5): 跳过>24h陈旧预报 — 之前kriging/chronos三天前的快照
+        # 跟今天实测对比产生73hPa假MAE, 把综合分拖到40/100。新鲜度门保证评分只反映当前活跃模型。
+        if now_ts - record_ts > 24 * 3600:
+            fc['_evaluated'] = True
+            continue
         source = fc.get('source', 'unknown')
         data = fc.get('data', {})
 
@@ -238,9 +283,17 @@ def do_evaluate():
 
             # 站内压→MSL: forecast.json 的 P 是 UNO 机柜站内压(~821hPa),
             # METAR altim 是海平面压(~1016), 不换算就是 233hPa 假MAE
+            # 2026-09-09 修复：标准等温气压高度换算(标准大气标高公式)
+            # p0 = p * exp(h / H), H=8430m 为标准大气标高 R*T0/(M*g),
+            # h=2103m 为昆明站海拔(原2104为笔误)。-38.8 为昆明站标定偏移,
+            # 与 api_local.c 的 UNO_P_OFFSET_HPA 一致(由 1016-822*exp(2103/8430) 得出),
+            # 经验证该组合输出≈1016hPa 与 METAR 吻合, 故保留。
             if pred_press is not None and 700 < pred_press < 950:
                 import math
-                pred_press = pred_press * math.exp(2104.0 / 8430.0) - 38.8
+                H_SCALE = 8430.0   # 标准大气标高 (m)
+                H_KUNMING = 2103.0  # 昆明长水机场海拔 (m)
+                pred_press = pred_press * math.exp(H_KUNMING / H_SCALE)
+                pred_press = pred_press - 38.8  # 站点标定偏移(见 api_local.c)
 
             eval_rec = {
                 'eval_ts': now_ts,
@@ -267,6 +320,17 @@ def do_evaluate():
         print(f'[score] ✅ 已评估 {len(new_evals)} 条预报-实测对比')
     else:
         print('[score] 无新的可评估数据')
+
+    # ⚠ 修复(2026-09-09 R5): 清理>48h陈旧记录 — 避免score_db无限膨胀导致历史包袱拖低分
+    before_fc = len(db.get('forecasts', []))
+    before_ev = len(db.get('evaluations', []))
+    db['forecasts'] = [f for f in db.get('forecasts', [])
+                       if now_ts - f.get('record_ts', 0) <= 48 * 3600]
+    db['evaluations'] = [e for e in db.get('evaluations', [])
+                         if now_ts - e.get('eval_ts', 0) <= 48 * 3600]
+    if len(db['forecasts']) < before_fc or len(db['evaluations']) < before_ev:
+        save_score_db(db)
+        print(f'[score] 🧹 清理陈旧: 预报{before_fc}→{len(db["forecasts"])} 评估{before_ev}→{len(db["evaluations"])}')
 
     _print_summary(db)
     return 0
@@ -320,7 +384,7 @@ def _eval_alerts(db):
     try:
         conn = sqlite3.connect(WENTIAN_DB)
         cur = conn.cursor()
-        cur.execute("SELECT ts, score, level, alert_msg FROM nowcast ORDER BY ts")
+        cur.execute("SELECT ts, score, level, warning_level FROM nowcast ORDER BY ts")
         rows = cur.fetchall()
         conn.close()
     except:
@@ -329,10 +393,12 @@ def _eval_alerts(db):
         return {}
 
     # 统计预警次数
-    levels = {'WATCH': 0, 'WARNING': 0, 'SEVERE': 0}
+    # ⚠ 修复(2026-09-09 R5): 原代码用{'WATCH','WARNING','SEVERE'}查r[2] (level列=中文"雷暴/飑线..."),
+    # 永远不匹配 → "预警总次数"恒为0, 报告系统性说谎。改查r[3] (warning_level列) 配合C实际写入的中文。
+    levels = {'关注': 0, '预警': 0, '强预警': 0}
     for r in rows:
-        if r[2] in levels:
-            levels[r[2]] += 1
+        if r[3] in levels:
+            levels[r[3]] += 1
 
     # 跟METAR TSRA对比
     try:

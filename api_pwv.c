@@ -96,9 +96,9 @@ static int storm_score(double pwv, double pwv_delta, double rh, double press) {
 
 /* ── 从GNSS取最新坐标 ──────────────────────────────────── */
 static int load_gnss_pos(double *lat, double *lon, double *alt) {
-    *lat = 25.09917;
-    *lon = 102.92667;
-    *alt = 2103.0;  /* 默认初始化, 防止未使用警告 */
+    *lat = WENTIAN_LAT;
+    *lon = WENTIAN_LON;
+    *alt = WENTIAN_ALT;  /* 统一用 wentian.h 常量 */
 
     sqlite3 *db;
     if (sqlite3_open("/root/data/ano_weather.db", &db) != SQLITE_OK) return -1;
@@ -119,9 +119,9 @@ static int load_gnss_pos(double *lat, double *lon, double *alt) {
     sqlite3_finalize(st);
     sqlite3_close(db);
     /* 回退: 主人家固定坐标 */
-    *lat = 25.09917;
-    *lon = 102.92667;
-    *alt = 2103.0;
+    *lat = WENTIAN_LAT;
+    *lon = WENTIAN_LON;
+    *alt = WENTIAN_ALT;
     return 0;
 }
 
@@ -252,7 +252,7 @@ static int pwv_csv_append(const wt_pwv_t *p) {
     }
 
     /* 海平面气压(近似) */
-    double p_sea = p->press_hpa + (2103.0 * PWV_PRESSURE_GRAD);
+    double p_sea = p->press_hpa + (WENTIAN_ALT * PWV_PRESSURE_GRAD);
     /* 用unix时间戳(整数), 这样load_pwv_recent能自动识别为新格式 */
     fprintf(f, "%ld,%.2f,%.1f,%.1f,%.2f,%.6f,%.6f,%.6f,%.4f,%.2f,%d\n",
         (long)p->ts, p->temp_c, p->humid_pct, p_sea, p->press_hpa,

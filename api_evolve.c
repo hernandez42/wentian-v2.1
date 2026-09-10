@@ -307,7 +307,11 @@ static int wt_evo_save(const wt_evo_t *e) {
     sqlite3_bind_text(st, 3, e->target, -1, SQLITE_TRANSIENT);
     sqlite3_bind_double(st, 4, e->mae_temp);
     sqlite3_bind_double(st, 5, e->mae_press);
-    sqlite3_bind_double(st, 6, e->mae_humid);
+    /* ⚠ 修复(2026-09-09): mae_humid 历史上声明了、也建了DB列, 但从未计算,
+     * 恒为0入库 — 会被下游读成"湿度误差0 / 评估通过"的假信号。
+     * 本系统目前没有湿度预测值, METAR也不提供实测湿度, 无法计算。
+     * 因此显式写 NULL(未知), 绝不用0冒充"零误差"。待接入湿度预测后再改回实算。 */
+    sqlite3_bind_null(st, 6);
     sqlite3_bind_int(st, 7, e->hit);
     sqlite3_bind_int(st, 8, e->miss);
     sqlite3_bind_int(st, 9, e->false_alarm);
@@ -416,14 +420,17 @@ static void wt_self_evolve_adjust(double *io_factor) {
     double avg_recent = sum_recent / 5.0;
     double avg_older  = (n > 5) ? sum_older / (n - 5) : avg_recent;
 
-    /* 若最近分 < 较分5%, 说明模型漂移, 收紧阈值系数 */
-    if (avg_recent < avg_older - 5.0) {
-        *io_factor = 0.95;  /* 收紧5% */
-    } else if (avg_recent > avg_older + 5.0) {
-        *io_factor = 1.05;  /* 放松5% */
-    } else {
-        *io_factor = 1.0;
-    }
+    /* ⚠ 修复(2026-09-09): 旧实现是三档写死常量(0.95/1.0/1.05), 注释却宣称
+     * "用回归/分布分析优化参数" — 名实不符。
+     * 现改为基于真实统计量的**连续**比例微调: 以最近5次与前5次的评分差为输入,
+     * 按 100 分为满量程做线性缩放(差10分→±10%), 并限幅在 ±10% 防止过冲。
+     * 仍未使用回归(线性回归需要更长的稳定样本与显著性检验, 暂不具备),
+     * 故注释同步改为诚实描述, 不再宣称"回归/分布分析"。 */
+    double diff = avg_recent - avg_older;      /* 正=近期变好, 负=模型漂移 */
+    double factor = 1.0 + (diff / 100.0);
+    if (factor < 0.90) factor = 0.90;          /* 限幅: 单次最多收紧10% */
+    if (factor > 1.10) factor = 1.10;          /* 限幅: 单次最多放松10% */
+    *io_factor = factor;
 }
 
 /* ── 主入口: 自进化/自愈/自完善 ───────────────────────────── */

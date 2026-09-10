@@ -62,6 +62,31 @@ SOLAR_TERMS = [
     '立冬', '小雪', '大雪', '冬至', '小寒', '大寒'
 ]
 
+
+# 2026-09-09 修复：真实太阳视黄经(考虑轨道偏心率), NOAA低精度算法, 误差<0.01°
+def solar_apparent_longitude(dt):
+    """输入带时区的 datetime, 返回太阳视黄经(0~360°)。用于定节气, 取代原线性DOY近似"""
+    import math
+    f = (dt.hour + (dt.minute + (dt.second + dt.microsecond * 1e-6) / 60) / 60) / 24.0
+    y, m = dt.year, dt.month
+    d = dt.day + f
+    if m <= 2:
+        y -= 1
+        m += 12
+    a = y // 100
+    b = 2 - a + a // 4
+    jd = int(365.25 * (y + 4716)) + int(30.6001 * (m + 1)) + d + b - 1524.5
+    t = (jd - 2451545.0) / 36525.0
+    L0 = 280.46646 + 36000.76983 * t + 0.0003032 * t * t
+    M = 357.52911 + 35999.05029 * t - 0.0001537 * t * t
+    Mr = math.radians(M)
+    C = (math.sin(Mr) * (1.914602 - 0.004817 * t - 0.000014 * t * t)
+         + math.sin(2 * Mr) * (0.019993 - 0.000101 * t)
+         + math.sin(3 * Mr) * 0.000289)
+    true_lon = L0 + C
+    om = 125.04 - 1934.136 * t
+    return (true_lon - 0.00569 - 0.00478 * math.sin(math.radians(om))) % 360.0
+
 def solar_term_from_sun_lon(sun_lon):
     """太阳黄经 → 节气。立春从315°起, 每15°一节气"""
     normalized = (sun_lon - 315 + 360) % 360
@@ -71,9 +96,8 @@ def solar_term_from_sun_lon(sun_lon):
 
 
 def solar_term_now():
-    doy = datetime.now().timetuple().tm_yday
-    sun_lon = (doy - 80) * 360.0 / 365.25
-    sun_lon = sun_lon % 360
+    # 2026-09-09 修复：改用真实太阳视黄经, 不再用线性DOY近似
+    sun_lon = solar_apparent_longitude(datetime.now())
     term_name, term_idx = solar_term_from_sun_lon(sun_lon)
     return term_name, term_idx, sun_lon
 

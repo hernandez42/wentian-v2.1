@@ -1,0 +1,10 @@
+[Unit]
+Description=Wentian nowcast alert auto-push
+After=wentian.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /root/scripts/wentian/push_alert.py
+StandardOutput=append:/var/log/wentian-push.log
+StandardError=append:/var/log/wentian-push.err

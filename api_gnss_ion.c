@@ -169,13 +169,22 @@ static void klobuchar_model(double lat_deg, double lon_deg, double elev_deg,
     if (E_semi < 0.05) E_semi = 0.055;  /* ~10° 下限 */
     if (E_semi > 0.85) E_semi = 0.85;   /* ~153° 上限 */
 
-    /* 地心角(半圆) — 用卫星仰角E, 非接收机海拔! */
-    double psi = 0.0137 / (E_semi + 0.11) - 0.022;
+    /* 地心角 psi=0.0137/(E+0.11)-0.022 用于推算子电离层点(IPP)。
+     * 标准需卫星方位角A: phi_i=phi_u+psi*cos(A), lambda_i=lambda_u+psi*sin(A)/cos(phi_i)。
+     * 本函数仅入参仰角、无方位角, 直接取 phi_i=phi_u、lambda_i=lambda_u(测站经纬度),
+     * 故psi在此处不使用。 */
 
     /* 测站地心纬度(半圆) */
-    double phi_i = lat + psi * cos(M_PI * lat);
+    /* 子电离层点地心纬度phi_i(半圆): 标准Klobuchar需卫星方位角A, phi_i=phi_u+psi*cos(A)。
+     * 本函数仅入参仰角、无方位角, 取 phi_i=phi_u(接收机纬度), 忽略psi·cos(A)偏移项
+     * (偏差<0.1半圆, 对垂直延迟影响很小)。旧代码用 cos(M_PI*lat) 近似方位角是错误写法。 */
+    double phi_i = lat;
     if (phi_i > 0.416) phi_i = 0.416;
     if (phi_i < -0.416) phi_i = -0.416;
+    /* 地磁纬度phi_m(半圆) — IS-GPS-200 标准: alpha/beta 多项式必须用 phi_m 而非 phi_i */
+    double phi_m = phi_i + 0.064 * cos(phi_i - 1.617);
+    if (phi_m > 0.416) phi_m = 0.416;
+    if (phi_m < -0.416) phi_m = -0.416;
 
     /* 地方时(秒) */
     double t = 4.32e4 * lon + utc_sec;
@@ -187,9 +196,9 @@ static void klobuchar_model(double lat_deg, double lon_deg, double elev_deg,
     if (f < 1.0) f = 1.0;
 
     /* 周期(秒) */
-    double p = KLOB_BETA[0] + KLOB_BETA[1] * (phi_i / M_PI)
-             + KLOB_BETA[2] * (phi_i / M_PI) * (phi_i / M_PI)
-             + KLOB_BETA[3] * (phi_i / M_PI) * (phi_i / M_PI) * (phi_i / M_PI);
+    double p = KLOB_BETA[0] + KLOB_BETA[1] * (phi_i)
+             + KLOB_BETA[2] * (phi_i) * (phi_i)
+             + KLOB_BETA[3] * (phi_i) * (phi_i) * (phi_i);
     if (p < 72000) p = 72000;
 
     /* 相位(秒) */
@@ -200,9 +209,9 @@ static void klobuchar_model(double lat_deg, double lon_deg, double elev_deg,
     if (fabs(x) > M_PI / 2) {
         amp = f * 5e-9;
     } else {
-        amp = f * (KLOB_ALPHA[0] + KLOB_ALPHA[1] * (phi_i / M_PI)
-                   + KLOB_ALPHA[2] * (phi_i / M_PI) * (phi_i / M_PI)
-                   + KLOB_ALPHA[3] * (phi_i / M_PI) * (phi_i / M_PI) * (phi_i / M_PI));
+        amp = f * (KLOB_ALPHA[0] + KLOB_ALPHA[1] * (phi_m)
+                   + KLOB_ALPHA[2] * (phi_m) * (phi_m)
+                   + KLOB_ALPHA[3] * (phi_m) * (phi_m) * (phi_m));
         if (amp < 0) amp = 0;
     }
 
@@ -228,7 +237,7 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts) {
     out->ts = ts;
 
     /* 位置: 昆明长水 */
-    const double LAT = 25.09917, LON = 102.92667;
+    const double LAT = WENTIAN_LAT, LON = WENTIAN_LON;  /* 修复: 统一用 wentian.h 常量, 防坐标散落 */
 
     /* 加载SNR数据 */
     double gps_snrs[64] = {0}, bds_snrs[64] = {0}, pdops[32] = {0};

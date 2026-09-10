@@ -94,18 +94,30 @@ int wt_db_init(const char *path) {
     return 0;
 }
 
+/* 2026-09-09 修复: 执行失败时直接 return -1, 让调用方感知写库失败
+   (原实现仅 fprintf 警告后照常 return 0, 数据静默丢失)。调用方忽略
+   返回值不受影响, 但失败不再被掩盖。 */
 #define DB_SAVE(name, sql, ...) do { \
-    sqlite3 *db; if (sqlite3_open(WENTIAN_DB, &db) == SQLITE_OK) { \
-        sqlite3_stmt *st; \
-        if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) { \
-            __VA_ARGS__; \
-            int rc = sqlite3_step(st); \
-            if (rc != SQLITE_DONE) \
-                fprintf(stderr, "[WARN] DB_SAVE(%s) rc=%d: %s\n", #name, rc, sqlite3_errmsg(db)); \
-        } \
+    sqlite3 *db; if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) { \
+        fprintf(stderr, "[ERR] DB_SAVE(%s) 打开数据库失败\n", #name); \
+        return -1; \
+    } \
+    sqlite3_stmt *st; \
+    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK) { \
+        fprintf(stderr, "[ERR] DB_SAVE(%s) prepare失败: %s\n", #name, sqlite3_errmsg(db)); \
+        sqlite3_close(db); \
+        return -1; \
+    } \
+    __VA_ARGS__; \
+    int rc = sqlite3_step(st); \
+    if (rc != SQLITE_DONE) { \
+        fprintf(stderr, "[ERR] DB_SAVE(%s) rc=%d: %s\n", #name, rc, sqlite3_errmsg(db)); \
         sqlite3_finalize(st); \
         sqlite3_close(db); \
+        return -1; \
     } \
+    sqlite3_finalize(st); \
+    sqlite3_close(db); \
 } while (0)
 
 int wt_db_save_outdoor(const wt_outdoor_t *o) {
