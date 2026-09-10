@@ -487,7 +487,7 @@ int wt_evo_run(void) {
     wt_self_evolve_adjust(&factor);
     printf("  🎯 自完善: 阈值系数=%.3f (1.0=不变, <1=收紧, >1=放松)\n", factor);
     /* 持久化 factor 供 api_predict.c 读取回传, 闭环闭合 */
-    FILE *ff = fopen("/root/data/fusion/evolve_factor.json", "w");
+    FILE *ff = fopen(WENTIAN_FUSION_DIR "/evolve_factor.json", "w");
     if (ff) {
         fprintf(ff, "{\"factor\": %.4f, \"ts\": %ld}\n", factor, (long)time(NULL));
         fclose(ff);

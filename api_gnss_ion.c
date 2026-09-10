@@ -34,7 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define OWNER_DB    "/root/data/ano_weather.db"
+#define OWNER_DB    ANO_DB  /* 全局常量 */
 
 /* ── 字符串化宏 ────────────────────────────────────────── */
 #define XSTRING(s)  XSTRING_(s)

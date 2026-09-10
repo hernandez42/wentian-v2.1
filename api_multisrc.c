@@ -37,8 +37,8 @@
 #include <unistd.h>
 
 /* ── SDR GNSS 频点扫频数据目录 ─────────────────────────── */
-#define SDR_GNSS_DIR "/root/data/sdr/gnss_sweep_v2"
-#define MULTISRC_JSON "/root/data/fusion/multisrc_fusion.json"
+#define SDR_GNSS_DIR SDR_DIR "/gnss_sweep_v2"  /* 全局常量 */
+#define MULTISRC_JSON WENTIAN_FUSION_DIR "/multisrc_fusion.json"
 
 /* ── 数据源权重 (主人在ENSO大考版校准) ──────────────────── */
 /* 2026-09-09 修复: 原 W_SDR/W_GNSS_UART/W_OPENMETEO/W_SCINTPI/W_UNO 宏

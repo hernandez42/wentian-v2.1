@@ -52,6 +52,8 @@
 #define WENTIAN_ALT        2103         /* 长水机场ZPPP真海拔 (2103.5m, 取整) */
 #define WENTIAN_DB         "/root/data/wentian.db"
 #define WENTIAN_FUSION_DIR "/root/data/fusion"
+#define ANO_DB             "/root/data/ano_weather.db"
+#define SDR_DIR            "/root/data/sdr"
 
 #define WENTIAN_USER_AGENT "WenTian/1.0 (RK3588; Linux)"
 

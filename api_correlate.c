@@ -35,7 +35,7 @@
 #include <sqlite3.h>
 #include <math.h>
 
-#define CORREL_JSON          "/root/data/fusion/radar_correlation.json"
+#define CORREL_JSON          WENTIAN_FUSION_DIR "/radar_correlation.json"
 #define CORREL_TABLE         "radar_correl"
 #define PWV_HISTORY_CSV      "/root/data/fusion/pwv_history.csv"  /* 与api_nowcast.c共享 */
 
@@ -195,7 +195,7 @@ static int load_uno_features(time_t ts, int span_min, double *feat, int n) {
     (void)ts; (void)span_min; (void)n;
     sqlite3 *db;
     /* ano_weather 表在主人硬件库, 不在 wentian.db */
-    if (sqlite3_open("/root/data/ano_weather.db", &db) != SQLITE_OK) return -1;
+    if (sqlite3_open(ANO_DB, &db) != SQLITE_OK) return -1;
 
     sqlite3_stmt *st;
     /* ts是TEXT(2026-09-07T17:17:08), 用strftime转unix; 列: t,h,p,pa */

@@ -36,7 +36,7 @@
 #include <glob.h>
 
 /* 主人数据库路径 (硬编码,因为是主人专用数据库) */
-#define OWNER_DB "/root/data/ano_weather.db"
+#define OWNER_DB ANO_DB  /* 全局常量 */
 
 /* ── UNO 气压校准 ────────────────────────────────────────── */
 /* 长水机场 ZPPP: 海拔 2103.5m
@@ -208,7 +208,7 @@ int wt_local_sdr(wt_sdr_t *out, int max, int *count) {
     {
         glob_t g;
         memset(&g, 0, sizeof(g));
-        if (glob("/root/data/sdr/*sweep*", GLOB_ONLYDIR, NULL, &g) == 0) {
+        if (glob(SDR_DIR "/*sweep*", GLOB_ONLYDIR, NULL, &g) == 0) {
             for (size_t i = 0; i < g.gl_pathc; i++) {
                 struct stat sd;
                 if (stat(g.gl_pathv[i], &sd) != 0) continue;

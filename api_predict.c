@@ -386,7 +386,7 @@ static void read_imperial_factors(double *precip_adj, double *press_adj,
                                    double *storm_adj, int *system_stable) {
     *precip_adj = 1.0; *press_adj = 1.0;
     *storm_adj = 1.0; *system_stable = 1;
-    FILE *f = fopen("/root/data/fusion/imperial_enhancement.json", "r");
+    FILE *f = fopen(WENTIAN_FUSION_DIR "/imperial_enhancement.json", "r");
     if (!f) return;
     char buf[8192] = {0};
     size_t n = fread(buf, 1, sizeof(buf)-1, f); fclose(f);
@@ -616,7 +616,7 @@ static int wt_predict_compute(wt_predict_t *out) {
     /* 10. 等级 (阈值受自进化+钦天监双重微调) */
     /* 读取自进化系数 */
     double evolve_factor = 1.0;
-    FILE *ef = fopen("/root/data/fusion/evolve_factor.json", "r");
+    FILE *ef = fopen(WENTIAN_FUSION_DIR "/evolve_factor.json", "r");
     if (ef) {
         char ebuf[64] = {0};
         if (fread(ebuf, 1, sizeof(ebuf)-1, ef) > 0) {

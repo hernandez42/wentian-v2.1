@@ -327,6 +327,18 @@ def build_alert(nc, correl=None, google_val=None, llm_analysis='') -> dict:
     press_now = nc.get('press_current') or 0
     dp_3 = nc.get('dp_3min', 0)
     precip = nc.get('precip_intensity', '')
+    # ★R10(2026-09-10): 静止锋雨势自适应 — 主人发现"已开始下雨但预测持续阴雨"硬编码滞后
+    # 数据源: Open-Meteo hourly precipitation → wentian C 写入 precip_1h_mm
+    # 规则: 1h降水>2mm=峰值期, 0.5~2=持续中, <0.5=减弱收尾
+    precip_1h = nc.get('precip_1h_mm', 0) or 0
+    if precip_1h > 2.0:
+        precip_phase = 'peak'    # 峰值期: 雨强, 持续
+    elif precip_1h > 0.5:
+        precip_phase = 'mid'     # 持续期: 阵雨
+    elif precip_1h > 0.0:
+        precip_phase = 'tail'    # 减弱期: 毛毛雨快停
+    else:
+        precip_phase = 'none'    # 已停
 
     forecast_lines = []
     if main_type == '飑线' and main_score >= 26:
@@ -344,7 +356,15 @@ def build_alert(nc, correl=None, google_val=None, llm_analysis='') -> dict:
     elif main_type == '风切变' and main_score >= 26:
         forecast_lines.append('低空风切变将持续 30~60 分钟')
     elif main_type == '静止锋' and main_score >= 26:
-        forecast_lines.append('未来1~2小时持续阴雨, 短期内不会转晴')
+        # ★R10: 静止锋 — 按实时雨势自适应, 不再硬塞"持续阴雨不转晴"
+        if precip_phase == 'peak':
+            forecast_lines.append('未来1小时雨势维持, 雨强较大注意排水')
+        elif precip_phase == 'mid':
+            forecast_lines.append('未来1小时阵雨持续, 强度无显著变化')
+        elif precip_phase == 'tail':
+            forecast_lines.append('未来30分钟雨势减弱, 1小时内逐步转阴')
+        else:  # none
+            forecast_lines.append('静止锋减弱, 未来1小时阴到多云, 不再降雨')
     elif precip and precip not in ('无降水', '无数据'):
         forecast_lines.append(f'未来30分钟{precip}持续')
     else:
@@ -360,7 +380,11 @@ def build_alert(nc, correl=None, google_val=None, llm_analysis='') -> dict:
             direction = '↑' if pwv_slope > 0 else '↓'
             evidences.append(f'PWV {pwv_now:.0f}mm {tag}{direction}{abs(pwv_slope):.1f}mm/15min — 大气水汽{tag}, 强对流{"积蓄中" if pwv_slope>0 else "正在释放"}')
         elif pwv_now >= 40:
-            evidences.append(f'PWV {pwv_now:.0f}mm 偏高 — 水汽充沛, 有利对流')
+            # ★R10: 静止锋减弱期不说"有利对流", 而说"残余水汽"
+            if main_type == '静止锋' and precip_phase in ('tail', 'none'):
+                evidences.append(f'PWV {pwv_now:.0f}mm 残余水汽 — 降水正在减弱收尾')
+            else:
+                evidences.append(f'PWV {pwv_now:.0f}mm 偏高 — 水汽充沛, 有利对流')
         else:
             evidences.append(f'PWV {pwv_now:.0f}mm — 水汽中等')
 
@@ -436,7 +460,13 @@ def build_alert(nc, correl=None, google_val=None, llm_analysis='') -> dict:
     elif main_type == '风切变' and main_score >= 26:
         core_msg = '低空风切变'
     elif main_type == '静止锋' and main_score >= 26:
-        core_msg = '准静止锋维持'
+        # ★R10: 静止锋核心句也按实时雨势自适应
+        if precip_phase in ('peak', 'mid'):
+            core_msg = '静止锋维持'
+        elif precip_phase == 'tail':
+            core_msg = '静止锋雨势减弱'
+        else:  # none
+            core_msg = '静止锋减弱转好'
     elif precip and precip not in ('无降水', '无数据'):
         core_msg = f'{precip}持续'
     else:
