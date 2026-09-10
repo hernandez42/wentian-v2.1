@@ -1025,6 +1025,18 @@ def _section_llm_analysis() -> List[str]:
     if q.get('ancient_wisdom_note'):
         L.append(f'  📜 {q["ancient_wisdom_note"]}')
 
+    # 4b. 航空分析 (CCAR-121 + 钦天监)
+    av = a.get('aviation_analysis', {})
+    if av.get('flight_safety_level'):
+        sic = {'safe': '🟢', 'caution': '🟡', 'warning': '🟠', 'prohibited': '🔴'}
+        L.append(f'  ✈️ 航空安全: {sic.get(av["flight_safety_level"],"?")}{av["flight_safety_level"]}')
+    if av.get('recommended_runway'):
+        L.append(f'  🛫 推荐跑道: {av["recommended_runway"]}')
+    if av.get('crosswind_risk'):
+        L.append(f'  💨 侧风评估: {av["crosswind_risk"]}')
+    if av.get('qintianjian_aviation_note'):
+        L.append(f'  🏮 {av["qintianjian_aviation_note"]}')
+
     # 5. 趋势
     trend = a.get('trend_analysis', {})
     tdir = trend.get('temperature_trend', '?')
