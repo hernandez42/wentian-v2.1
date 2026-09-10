@@ -626,17 +626,21 @@ int wentian_collect_all(void) {
         if (rc != 0) printf("  ⚠ 钦天监失败 rc=%d\n", rc);
         rc = system("python3 /root/scripts/wentian/astral.py 2>/dev/null");
         if (rc != 0) printf("  ⚠ 星象失败 rc=%d\n", rc);
-    /* WeatherNext 2 — 每3小时刷新一次(防Open-Meteo 429限流) */
+    /* WeatherNext 3 — 多模型融合引擎(5模型: WN2+ECMWF+GFS+ICON+GEM) */
+    /* 每3小时刷新一次 */
     {
         struct stat wn_st;
         int wn_age = 999999;
-        if (stat("/root/data/fusion/weathernext_forecast.json", &wn_st) == 0) {
+        if (stat("/root/data/fusion/multi_model_forecast.json", &wn_st) == 0) {
             wn_age = (int)(time(NULL) - wn_st.st_mtime);
         }
         if (wn_age > 10800) {  /* >3小时 */
-            rc = system("python3 /root/scripts/wentian/weathernext_fetch.py 2>/dev/null");
-            printf("  📊 WeatherNext: 刷新(%ds旧→%s)\n",
-                   wn_age, rc == 0 ? "OK" : "失败");
+            rc = system("python3 /root/scripts/wentian/weathernext_fetch.py 2>&1");
+            if (rc != 0) printf("  ⚠ 多模型融合刷新失败 rc=%d\n", rc);
+            else printf("  ✅ 多模型融合已刷新(5模型: WN2+ECMWF+GFS+ICON+GEM)\n");
+        } else {
+            printf("  ✅ 多模型融合缓存有效(%d秒前)\n", wn_age);
+            printf("  ✅ 多模型: WN2+ECMWF+GFS+ICON+GEM (15天/5模型融合)\n");
         }
     }
         (void)rc;
