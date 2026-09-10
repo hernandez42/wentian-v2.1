@@ -494,7 +494,7 @@ static int export_one(sqlite3 *db, FILE *out) {
     fprintf(out, "    \"watching\": {\n");
     FILE *af = fopen("/root/data/fusion/watching.json", "r");
     char anote[256] = {0};
-    strcpy(anote, "日月星曜各安其位");
+    snprintf(anote, sizeof(anote), "%s", "日月星曜各安其位");
     if (af) {
         char abuf[4096];
         size_t an = fread(abuf, 1, sizeof(abuf)-1, af);

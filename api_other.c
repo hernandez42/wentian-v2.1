@@ -168,7 +168,7 @@ static const char *get_nasa_key(void) {
         }
         fclose(fp);
     }
-    if (!key[0]) strcpy(key, "DEMO_KEY");
+    if (!key[0]) snprintf(key, sizeof(key), "%s", "DEMO_KEY");
     return key;
 }
 

@@ -77,7 +77,7 @@ static int wt_local_uno_robust(wt_uno_t *out) {
     if (!fp) return -1;
     char line[1024], last[1024] = {0};
     while (fgets(line, sizeof(line), fp)) {
-        if (strstr(line, "UNO_v2.0_bridge")) strcpy(last, line);
+        if (strstr(line, "UNO_v2.0_bridge")) snprintf(last, sizeof(last), "%s", line);
     }
     fclose(fp);
     if (!last[0]) return -1;

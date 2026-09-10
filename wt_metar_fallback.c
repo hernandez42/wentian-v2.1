@@ -45,7 +45,7 @@ typedef struct {
 /* ── 源A: Open-Meteo ECMWF 作为实时METAR替代 ───────────── */
 static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
     memset(out, 0, sizeof(*out));
-    strcpy(out->icao, "ZPPP");
+    snprintf(out->icao, sizeof(out->icao), "%s", "ZPPP");
 
     char *body = wt_http_get(
         "https://api.open-meteo.com/v1/forecast?"
@@ -96,7 +96,7 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
     }
     out->visibility_m = 10000;  /* ECMWF 不提供能见度, 假设 CAVOK */
     out->obs_time = time(NULL);
-    strcpy(out->source, "openmeteo");
+    snprintf(out->source, sizeof(out->source), "%s", "openmeteo");
 
     /* 构建原始METAR文本 (ECMWF模拟) — 加SYNTHETIC前缀标记, 供打分脚本排除(禁止当实测) */
     {
@@ -110,14 +110,20 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
     }
 
     /* 天气码 → 文字 */
-    if (weather_code >= 95)   strcat(out->raw, " TS");
-    else if (weather_code >= 80) strcat(out->raw, " SHRA");
-    else if (weather_code >= 60) strcat(out->raw, " RA");
-    else if (weather_code >= 51) strcat(out->raw, " DZ");
-    else if (weather_code >= 45) strcat(out->raw, " FG");
-    else if (weather_code == 3)  strcat(out->raw, " VCTS");
+    {
+        size_t _l = strlen(out->raw);
+        if (weather_code >= 95)   snprintf(out->raw + _l, sizeof(out->raw) - _l, " TS");
+        else if (weather_code >= 80) snprintf(out->raw + _l, sizeof(out->raw) - _l, " SHRA");
+        else if (weather_code >= 60) snprintf(out->raw + _l, sizeof(out->raw) - _l, " RA");
+        else if (weather_code >= 51) snprintf(out->raw + _l, sizeof(out->raw) - _l, " DZ");
+        else if (weather_code >= 45) snprintf(out->raw + _l, sizeof(out->raw) - _l, " FG");
+        else if (weather_code == 3)  snprintf(out->raw + _l, sizeof(out->raw) - _l, " VCTS");
+    }
 
-    strcat(out->raw, " NOSIG");
+    {
+        size_t _l = strlen(out->raw);
+        snprintf(out->raw + _l, sizeof(out->raw) - _l, " NOSIG");
+    }
 
     free(body);
     return 0;
@@ -128,7 +134,7 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
 /* ── 源C: NWS tgftp 原始TXT ────────────────────────────── */
 static int fetch_nws_tgftp(wt_metar_fallback_t *out) {
     memset(out, 0, sizeof(*out));
-    strcpy(out->icao, "ZPPP");
+    snprintf(out->icao, sizeof(out->icao), "%s", "ZPPP");
 
     char *body = wt_http_get(
         "https://tgftp.nws.noaa.gov/data/observations/metar/stations/ZPPP.TXT", 10);
@@ -149,7 +155,7 @@ static int fetch_nws_tgftp(wt_metar_fallback_t *out) {
 
     strncpy(out->raw, metar_line, sizeof(out->raw) - 1);
     out->has_data = 1;
-    strcpy(out->source, "nws");
+    snprintf(out->source, sizeof(out->source), "%s", "nws");
 
     /* 解析原始 METAR 提取字段 */
     char *p = out->raw;
@@ -221,7 +227,7 @@ static int fetch_nws_tgftp(wt_metar_fallback_t *out) {
 int wt_metar_multisource(const char *icao, wt_metar_fallback_t *best) {
     if (!best) return -1;
     memset(best, 0, sizeof(*best));
-    strcpy(best->icao, icao ? icao : "ZPPP");
+    snprintf(best->icao, sizeof(best->icao), "%s", icao ? icao : "ZPPP");
 
     /* 源A: NWS tgftp (真实原始METAR, 权威优先) */
     wt_metar_fallback_t nws = {0};

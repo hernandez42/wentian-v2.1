@@ -375,10 +375,10 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
     else                       snprintf(out->warning_level, sizeof(out->warning_level), "%s", "无");
 
     /* 综合等级 (forecast) */
-    if (out->score >= 60) { strcpy(out->forecast, "强天气 imminent"); }
-    else if (out->score >= 40) { strcpy(out->forecast, "天气发展中"); }
-    else if (out->score >= 20) { strcpy(out->forecast, "关注天气生成"); }
-    else { strcpy(out->forecast, "天气稳定"); }
+    if (out->score >= 60) { snprintf(out->forecast, sizeof(out->forecast), "%s", "强天气 imminent"); }
+    else if (out->score >= 40) { snprintf(out->forecast, sizeof(out->forecast), "%s", "天气发展中"); }
+    else if (out->score >= 20) { snprintf(out->forecast, sizeof(out->forecast), "%s", "关注天气生成"); }
+    else { snprintf(out->forecast, sizeof(out->forecast), "%s", "天气稳定"); }
 
     /* 告警信息 */
     if (pos == 0) snprintf(alert, sizeof(alert), "无显著天气信号");

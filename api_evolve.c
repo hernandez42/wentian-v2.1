@@ -184,7 +184,7 @@ static int wt_evaluate_predictor(const char *predictor, int hours,
                                  wt_evo_t *out, const char *target_label,
                                  int offset_sec) {
     memset(out, 0, sizeof(*out));
-    strcpy(out->predictor, predictor);
+    snprintf(out->predictor, sizeof(out->predictor), "%s", predictor);
     snprintf(out->target, sizeof(out->target), "%s", target_label);
     out->ts = time(NULL);
 
