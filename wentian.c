@@ -649,6 +649,14 @@ int wentian_collect_all(void) {
         (void)rc;
     }
 
+    /* ═══ 28. 民航运行风险评估 (CCAR-121) ═══════════════ */
+    printf("\n━━━ 28. 民航运行风险评估 (CCAR-121基准) ━━━\n");
+    if (wt_aviation_assess() == 0) {
+        ok++;
+    } else {
+        fail++;
+    }
+
     /* ═══ 维度计数器 (钦天监特征已读入) ═══════ */
     ok++;  /* 钦天监算一个维度 */
 

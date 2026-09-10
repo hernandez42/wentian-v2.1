@@ -523,4 +523,7 @@ int wentian_collect_all(void);    /* 同步抓取所有API */
 int wentian_print_report(void);   /* 打印问天报告 */
 int wentian_daemon(int interval_sec);  /* 后台循环 */
 
+/* ── 民航运行风险评估 (api_aviation.c, CCAR-121基准) ──── */
+int wt_aviation_assess(void);
+
 #endif /* WENTIAN_H */
