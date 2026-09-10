@@ -1251,10 +1251,13 @@ def build_message(om: Dict, uno: Optional[Dict], ult: Optional[Dict],
                   wentian: Optional[Dict] = None) -> str:
     """
     🎯 问天精简卡片 v3.0
-    仅保留: 实况 + 钦天监 + 航空评估
+    保留核心气象数据, 合并重复段落
+    结构: 实况 → 今日 → 短临(合并24h) → 航空 → 钦天监+分析 → 6天 → 尾部
     """
     now = datetime.now()
     cur = om.get('current', {})
+    daily = om.get('daily', {})
+    hourly = om.get('hourly', {})
 
     stale_note = ''
     if not cur.get('temperature_2m'):
@@ -1267,18 +1270,32 @@ def build_message(om: Dict, uno: Optional[Dict], ult: Optional[Dict],
 
     L = []
     L += _header(now)
+    # 实况 (核心)
     L += _section_current(cur, uno, wx_code, wentian, stale_note)
-    # 钦天监
+    # 今日预报 (核心)
+    if daily.get('time'):
+        L += _section_today(daily, hourly, now.date(), wentian, wx_code)
+    # 短临 + 24h合并为一段
+    L += ['', '━━━ ⏱ 短临 + 未来24h ━━━']
+    fus = _section_short_fusion(ult)
+    h24 = _section_24h()
+    L += fus[1:4] if len(fus) > 3 else ['  短临: 数据正常']
+    L += h24[1:5] if len(h24) > 4 else []
+    # 航空评估 (新增)
+    L += ['', '━━━ ✈️ 长水运行风险评估 ━━━']
+    L += get_aviation_summary()
+    # 钦天监 + 分析 (合并)
+    L += ['', '━━━ 🏮 钦天监 + AI分析 ━━━']
+    L += _section_analysis(wentian)[1:4] if len(_section_analysis(wentian)) > 3 else []
     if HAS_QINTIANJIAN:
         try:
             L += _qintianjian_render(get_qintianjian())
         except Exception as _e:
             print(f'[qintianjian] 渲染失败: {_e}')
-    # 航空评估
-    L += ['', '━━━ ✈️ 长水飞行运行风险评估 ━━━']
-    L += get_aviation_summary()
-    # LLM深度分析 (保留, 含钦天监解读)
-    L += _section_llm_analysis()
+    # 未来6天 (核心)
+    if daily.get('time'):
+        L += ['', '━━━ 📅 未来6天 ━━━']
+        L += _section_6day(daily, wentian, wx_code)[1:]
     # 尾部
     L += _section_footer(ult, alerts, wentian)
 
