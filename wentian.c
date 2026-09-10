@@ -262,21 +262,18 @@ int wentian_collect_all(void) {
         fail++;
     }
 
-    /* ═══ 6. 备用机场 METAR ─────────────────────────────── */
-    printf("\n━━━ 6. 备用机场 METAR (ZUUK/ZPLJ/ZUTF) ━━━\n");
-    const char *alt_icaos[] = {"ZUUK", "ZPLJ", "ZUTF"};
-    for (int i = 0; i < 3; i++) {
+    /* ═══ 6. 备用机场 METAR (芒市/丽江/版纳/贵阳/成都) ──────── */
+    printf("\n━━━ 6. 备用机场 METAR (5座) ━━━\n");
+    const char *alt_icaos[] = {"ZPMS", "ZPLJ", "ZPJH", "ZUGY", "ZUUU"};
+    const char *alt_names[] = {"芒市", "丽江", "版纳", "贵阳", "成都"};
+    for (int i = 0; i < 5; i++) {
         wt_metar_t alt = {0};
-        /* ⚠ 修复(2026-09-08): 备用机场无真实METAR时禁写合成数据。
-         * 旧逻辑 fallback 到 wt_metar_fallback_run() 硬编码ZPPP坐标,
-         * 生成 SYNTHETIC ZPPP 数据写回 metar 表, 覆盖主站刚拉到的真实METAR,
-         * 导致 nowcast 读到合成气压1010而非真实1022。 */
         if (wt_aviation_metar(alt_icaos[i], &alt) == 0 && alt.obs_time > time(NULL) - 10800) {
-            printf("  ✅ %s T=%.0f°C 风%d°/%dkt 气压=%.0fhPa\n",
-                alt.icao, alt.temp, alt.wind_dir, alt.wind_speed_kt, alt.altim_hpa);
+            printf("  ✅ %s(%s) T=%.0f°C 风%d°/%dkt 气压=%.0fhPa\n",
+                alt.icao, alt_names[i], alt.temp, alt.wind_dir, alt.wind_speed_kt, alt.altim_hpa);
             wt_db_save_metar(&alt);
         } else {
-            printf("  ⚠️ %s 无新鲜真实METAR, 跳过(禁写合成数据防污染ZPPP)\n", alt_icaos[i]);
+            printf("  ⚠️ %s(%s) 无实时METAR\n", alt_icaos[i], alt_names[i]);
         }
     }
 
