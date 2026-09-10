@@ -49,6 +49,8 @@
 #define WENTIAN_VERSION    "1.0.0"
 #define WENTIAN_LAT        25.09917
 #define WENTIAN_LON        102.92667
+#define WENTIAN_LAT_STR    "25.09917"
+#define WENTIAN_LON_STR    "102.92667"
 #define WENTIAN_ALT        2103         /* 长水机场ZPPP真海拔 (2103.5m, 取整) */
 #define WENTIAN_DB         "/root/data/wentian.db"
 #define WENTIAN_FUSION_DIR "/root/data/fusion"

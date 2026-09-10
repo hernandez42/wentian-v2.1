@@ -361,18 +361,18 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
      * 卡片上出现"雷暴 评分15/100 告警=无"的自相矛盾显示 */
     if (out->score >= 20) {
         for (int i = 0; i < 5; i++) {
-            if (scores[i] == out->score) { strcpy(out->level, types[i]); break; }
+            if (scores[i] == out->score) { snprintf(out->level, sizeof(out->level), "%s", types[i]); break; }
         }
     } else {
-        strcpy(out->level, "稳定");
+        snprintf(out->level, sizeof(out->level), "%s", "稳定");
     }
     if (out->score > 100) out->score = 100;
 
     /* ── GB/T 4.3.1 警报等级 (基于评分) ─────────────────── */
-    if (out->score >= 60)      strcpy(out->warning_level, "强预警");
-    else if (out->score >= 40) strcpy(out->warning_level, "预警");
-    else if (out->score >= 20) strcpy(out->warning_level, "关注");
-    else                       strcpy(out->warning_level, "无");
+    if (out->score >= 60)      snprintf(out->warning_level, sizeof(out->warning_level), "%s", "强预警");
+    else if (out->score >= 40) snprintf(out->warning_level, sizeof(out->warning_level), "%s", "预警");
+    else if (out->score >= 20) snprintf(out->warning_level, sizeof(out->warning_level), "%s", "关注");
+    else                       snprintf(out->warning_level, sizeof(out->warning_level), "%s", "无");
 
     /* 综合等级 (forecast) */
     if (out->score >= 60) { strcpy(out->forecast, "强天气 imminent"); }
@@ -382,7 +382,7 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
 
     /* 告警信息 */
     if (pos == 0) snprintf(alert, sizeof(alert), "无显著天气信号");
-    strcpy(out->alert_msg, alert);
+    snprintf(out->alert_msg, sizeof(out->alert_msg), "%s", alert);
 
     /* ── METAR降水强度分级 (GB/T 4.1.15-17) ──────────────── */
     /* 用最新METAR raw数据进行降水代码解析, 显式分级 */

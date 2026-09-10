@@ -49,7 +49,7 @@ static int fetch_openmeteo_metar(wt_metar_fallback_t *out) {
 
     char *body = wt_http_get(
         "https://api.open-meteo.com/v1/forecast?"
-        "latitude=25.09917&longitude=102.92667"
+        "latitude=" WENTIAN_LAT_STR "&longitude=" WENTIAN_LON_STR
         "&current=temperature_2m,relative_humidity_2m,pressure_msl,"
         "weather_code,wind_speed_10m,wind_direction_10m,cloud_cover"
         "&timezone=auto", 10);

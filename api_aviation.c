@@ -12,13 +12,6 @@
 
 #define AVIATION_REPORT "/root/data/fusion/aviation_report.txt"
 
-/* ── 工具: 风向差计算 ──────────────────────────────────── */
-static double wind_diff_abs(double wdir, double rwy_hdg) {
-    double d = fabs(wdir - rwy_hdg);
-    if (d > 180.0) d = 360.0 - d;
-    return d;
-}
-
 /* ── 侧风/顺风分量 ────────────────────────────────────── */
 static void calc_wind_comp(double wind_dir, double wind_spd_kt,
                             double rwy_hdg, double *xw, double *tw) {
