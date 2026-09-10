@@ -1223,59 +1223,64 @@ def _section_footer(ult: Optional[Dict], alerts: List[str],
     ])
     return L
 
+def get_aviation_summary() -> List[str]:
+    """读航空风险评估报告, 提取核心结论"""
+    path = '/root/data/fusion/aviation_report.txt'
+    if not os.path.exists(path):
+        return ['  ⚠ 航空评估暂不可用']
+    try:
+        with open(path) as f:
+            text = f.read()
+        lines = []
+        for line in text.split('\n'):
+            if '推荐跑道' in line:
+                lines.append(f'  🛫 {line.strip()}')
+            elif '备降场评估' in line:
+                lines.append(f'  🛬 {line.strip()}')
+            elif '雷暴' in line and ':' in line:
+                lines.append(f'  ⛈ {line.strip()}')
+            elif '积冰' in line and ':' in line:
+                lines.append(f'  ❄️ {line.strip()}')
+        return lines if lines else ['  ✅ 航空评估: 无特殊天气']
+    except Exception as e:
+        return [f'  ⚠ 航空评估读取失败: {e}']
+
+
 def build_message(om: Dict, uno: Optional[Dict], ult: Optional[Dict],
                   chronos: Any, kriging: Any, alerts: List[str],
                   wentian: Optional[Dict] = None) -> str:
     """
-    🎯 问天气象站 飞书卡片构建器 (优化版)
-
-    拆分前: complexity=48, lines=246 (单巨型函数)
-    拆分后: 7个_section_* helper, 主函数50行
-
-    v1.1.2: 加入 wentian 参数显示22维度问天数据
+    🎯 问天精简卡片 v3.0
+    仅保留: 实况 + 钦天监 + 航空评估
     """
     now = datetime.now()
     cur = om.get('current', {})
-    daily = om.get('daily', {})
-    hourly = om.get('hourly', {})
 
-    # ⚠ 修复(2026-09-05): Open-Meteo重试后仍失败时, 用本地DB最新实况兜底,
-    # 并明确标注"非实时" — 绝不再推送全0实况
     stale_note = ''
     if not cur.get('temperature_2m'):
         dbcur = get_db_current()
         if dbcur:
-            stale_note = f'本地DB缓存 {dbcur["ts"]} (Open-Meteo暂不可达)'
+            stale_note = f'本地DB缓存 (问天/C引擎)'
             cur = dbcur
-            print(f'[实况] Open-Meteo不可用, DB兜底: {stale_note}')
-        else:
-            stale_note = '无任何实时数据源 (Open-Meteo不可达且DB无缓存)'
 
-    # 当前小时weather_code (从current获取)
     wx_code = _safe_int(cur.get('weather_code', 0))
 
-    # 拼接7个段落
     L = []
     L += _header(now)
     L += _section_current(cur, uno, wx_code, wentian, stale_note)
-    if daily.get('time'):
-        L += _section_today(daily, hourly, now.date(), wentian, wx_code)
-    L += _section_short_fusion(ult)
-    L += _section_24h()
-    L += _section_analysis(wentian)
-    L += _section_llm_analysis()
-    L += _section_google_validate()
-    if daily.get('time'):
-        L += _section_6day(daily, wentian, wx_code)
-        L += _section_indices(cur, daily)
-    L += _section_footer(ult, alerts, wentian)
-
-    # R9 (2026-09-09): 钦天监 + 中国传统天象 — 主人明示"必须结合中国传统天象"
+    # 钦天监
     if HAS_QINTIANJIAN:
         try:
             L += _qintianjian_render(get_qintianjian())
         except Exception as _e:
             print(f'[qintianjian] 渲染失败: {_e}')
+    # 航空评估
+    L += ['', '━━━ ✈️ 长水飞行运行风险评估 ━━━']
+    L += get_aviation_summary()
+    # LLM深度分析 (保留, 含钦天监解读)
+    L += _section_llm_analysis()
+    # 尾部
+    L += _section_footer(ult, alerts, wentian)
 
     return '\n'.join(L)
 
