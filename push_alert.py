@@ -180,7 +180,7 @@ def _llm_cache_put(key, text, ttl_sec=1800):
         print(f'[push_alert] ⚠ 写LLM缓存失败: {e}')
 
 def analyze_with_llm(nc, correl, google_val):
-    """调 hermes chat 本机默认 LLM 做深度分析。
+    """直连网关模型链(DeepSeek→GLM)做深度分析。
 
     返回: str (1-3 句深度分析, 如'下击暴流冷池出流...'), 或空串(跳过得优雅)。
     失败: 任何异常 → 返回空串, 不影响推送链路。
