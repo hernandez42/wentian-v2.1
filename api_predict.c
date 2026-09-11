@@ -381,26 +381,31 @@ static int detect_storm_precursor(const double *p_series, int n,
 }
 
 /* ── 读取钦天监增强因子 ────────────────────────────────── */
-/* 从imperial_enhancement.json读所有传统文化维度, 返回因子 */
+/* 从imperial_enhancement table读(而非JSON, 消除文件IPC非原子风险) */
 static void read_imperial_factors(double *precip_adj, double *press_adj,
                                    double *storm_adj, int *system_stable) {
     *precip_adj = 1.0; *press_adj = 1.0;
     *storm_adj = 1.0; *system_stable = 1;
-    FILE *f = fopen(WENTIAN_FUSION_DIR "/imperial_enhancement.json", "r");
-    if (!f) return;
-    char buf[8192] = {0};
-    size_t n = fread(buf, 1, sizeof(buf)-1, f); fclose(f);
-    if (n == 0) return;
-
-    const char *v;
-    v = strstr(buf, "\"precip_adjust_factor\":");
-    if (v) { double x = strtod(v + 23, NULL); if (x > 0) *precip_adj = x; }
-    v = strstr(buf, "\"press_adjust_factor\":");
-    if (v) { double x = strtod(v + 22, NULL); if (x > 0) *press_adj = x; }
-    v = strstr(buf, "\"term_storm_factor\":");
-    if (v) { double x = strtod(v + 20, NULL); if (x > 0.1) *storm_adj = x; }
-    v = strstr(buf, "\"system_stable\":");
-    if (v) { *system_stable = (int)strtod(v + 16, NULL); }
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return;
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(db,
+        "SELECT precip_adjust_factor, press_adjust_factor, term_storm_factor, system_stable "
+        "FROM imperial_enhancement ORDER BY ts DESC LIMIT 1",
+        -1, &st, NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            double pf = sqlite3_column_double(st, 0);
+            double prf = sqlite3_column_double(st, 1);
+            double sf = sqlite3_column_double(st, 2);
+            int ss = sqlite3_column_int(st, 3);
+            if (!isnan(pf) && pf > 0) *precip_adj = pf;
+            if (!isnan(prf) && prf > 0) *press_adj = prf;
+            if (!isnan(sf) && sf > 0.1) *storm_adj = sf;
+            if (ss == 0 || ss == 1) *system_stable = ss;
+        }
+        sqlite3_finalize(st);
+    }
+    sqlite3_close(db);
 }
 
 /* ── 多源融合预测主入口 ────────────────────────────────────── */

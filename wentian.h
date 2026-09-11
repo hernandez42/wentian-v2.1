@@ -498,6 +498,49 @@ int wt_metar_fallback_run(wt_metar_t *out);  /* Open-Meteo/NWS/OGIMET 自动降�
 /* ── 等效 TEC 引擎 (api_tec.c) ────────────────────────────── */
 int wt_tec_run(void);                       /* 多源 TEC 融合 (Kp/F10.7/S4→TECU) */
 
+/* ── 钦天监 (api_imperial.c, C原生替代Python) ──────────── */
+typedef struct {
+    int     ts;                  /* Unix时间戳 */
+    /* 节气 */
+    char    solar_term[16];      /* 当前节气名 */
+    int     solar_term_idx;      /* 节气索引0-23 */
+    char    term_note[32];       /* 节气气候特征 */
+    double  sun_lon_deg;         /* 太阳视黄经 */
+    double  storm_factor;        /* 节气风暴因子0-1 */
+    int     season_anomaly;      /* 气温偏离节气期望 */
+    /* 月相 */
+    double  moon_lon_deg;        /* 月球黄经 */
+    char    sun_mansion[4];      /* 日宿 */
+    char    moon_mansion[4];     /* 月宿 */
+    const char *moon_phase_name;     /* 月相名(指针, 静态字符串) */
+    const char *moon_phase_emoji;    /* 月相emoji */
+    double  moon_phase_angle;       /* 月相角度0-360 */
+    /* 五行 */
+    double  wuxing[5];           /* 火水木金土 */
+    char    wuxing_quadrant[64]; /* 四象限判断 */
+    double  wuxing_score;        /* 象限评分 */
+    double  precip_factor;       /* 降水修正因子 */
+    double  press_factor;        /* 气压修正因子 */
+    /* 卦象 */
+    char    hexagram[8];         /* 卦名 */
+    int     hexagram_idx;        /* 卦索引0-7 */
+    double  alert_threshold;     /* 预警阈值修正 */
+    int     system_stable;       /* 系统稳定度 */
+    /* 天象 */
+    const char *celestial_assessment; /* 天象评估指针 */
+    char    anomaly_detail[256]; /* 异常详情 */
+    char    enhancement_note[128]; /* 简要注释: 节气|五行|卦象 */
+} wt_imperial_t;
+
+int  wt_imperial_compute(wt_imperial_t *imp, time_t utc_ts);
+void wt_imperial_print(const wt_imperial_t *imp);
+int  wt_imperial_write_json(const wt_imperial_t *imp, const char *path);
+
+/* ── 数据库读辅助 ──────────────────────────────────────── */
+double wt_db_read_kp(void);
+double wt_db_read_s4(void);
+int    wt_db_read_outdoor(double *temp, double *humid, double *press, double *wind);
+
 /* ── 数据库 ──────────────────────────────────────────────── */
 int wt_db_init(const char *path);
 int wt_db_save_outdoor(const wt_outdoor_t *out);

@@ -673,14 +673,21 @@ int wentian_collect_all(void) {
     printf("\n━━━ 26. 等效 TEC 多源融合 ━━━\n");
     wt_tec_run();
 
-    /* ═══ 27. 钦天监v3.0 (合一引擎:节气/五行/卦象/星象/ROTI) ═══ */
-    printf("\n━━━ 27. 钦天监 v3.0 ━━━\n");
+    /* ═══ 27. 钦天监v3.0 (C原生, 零fork) ═══ */
+    printf("\n━━━ 27. 钦天监 v3.0 (C原生) ━━━\n");
     int qintianjian_ok = 0;
     {
-        int rc = system("python3 /root/scripts/wentian/imperial_observatory.py 2>/dev/null");
-        if (rc != 0) printf("  ⚠ 钦天监失败 rc=%d\n", rc); else qintianjian_ok = 1;
-        rc = system("python3 /root/scripts/wentian/astral.py 2>/dev/null");
-        if (rc != 0) printf("  ⚠ 星象失败 rc=%d\n", rc); else qintianjian_ok = 1;
+        wt_imperial_t imp;
+        if (wt_imperial_compute(&imp, time(NULL)) == 0) {
+            qintianjian_ok = 1;
+            wt_imperial_print(&imp);
+            /* 向后兼容: 写JSON供llm_weather_analyst.py读取 */
+            wt_imperial_write_json(&imp, WENTIAN_FUSION_DIR "/imperial_enhancement.json");
+            /* 也写astral.json(llm_weather_analyst.py也读它) */
+            /* 注: astral完整功能已合入api_imperial, 保持文件兼容 */
+        } else {
+            printf("  ⚠ 钦天监计算失败\n");
+        }
     /* WeatherNext 3 — 多模型融合引擎(5模型: WN2+ECMWF+GFS+ICON+GEM) */
     /* 每3小时刷新一次 */
     {
@@ -690,18 +697,17 @@ int wentian_collect_all(void) {
             wn_age = (int)(time(NULL) - wn_st.st_mtime);
         }
         if (wn_age > 10800) {  /* >3小时 */
-            rc = system("python3 /root/scripts/wentian/weathernext_fetch.py 2>&1");
-            if (rc != 0) printf("  ⚠ 多模型融合刷新失败 rc=%d\n", rc);
+            int wrc = system("python3 /root/scripts/wentian/weathernext_fetch.py 2>&1");
+            if (wrc != 0) printf("  ⚠ 多模型融合刷新失败 rc=%d\n", wrc);
             else printf("  ✅ 多模型融合已刷新(5模型: WN2+ECMWF+GFS+ICON+GEM)\n");
         } else {
             printf("  ✅ 多模型融合缓存有效(%d秒前)\n", wn_age);
             printf("  ✅ 多模型: WN2+ECMWF+GFS+ICON+GEM (15天/5模型融合)\n");
         }
     }
-        (void)rc;
         /* ⚠ 修复(2026-09-06): 真实TEC源替代硬编码Klobuchar — IGS WHU实时GIM */
-        rc = system("python3 /root/scripts/wentian/wt_fetch_tec.py 2>/dev/null");
-        (void)rc;
+        int tec_rc = system("python3 /root/scripts/wentian/wt_fetch_tec.py 2>/dev/null");
+        (void)tec_rc;
     }
 
     /* ═══ 28. 民航运行风险评估 (CCAR-121) ═══════════════ */

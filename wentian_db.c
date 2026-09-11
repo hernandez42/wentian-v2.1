@@ -279,3 +279,48 @@ int wt_db_save_fused_pressure(double fused, double p_uno, double p_om,
         sqlite3_bind_double(st, 6, sigma));
     return 0;
 }
+
+/* ── 钦天监DB读辅助 ───────────────────────────────── */
+double wt_db_read_kp(void) {
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return NAN;
+    sqlite3_stmt *st = NULL;
+    double kp = NAN;
+    if (sqlite3_prepare_v2(db, "SELECT noaa_kp_est FROM external_data ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) kp = sqlite3_column_double(st, 0);
+    }
+    sqlite3_finalize(st); sqlite3_close(db);
+    return kp;
+}
+double wt_db_read_s4(void) {
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return NAN;
+    sqlite3_stmt *st = NULL;
+    double s4 = NAN;
+    if (sqlite3_prepare_v2(db, "SELECT s4_gps FROM local_iono ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) s4 = sqlite3_column_double(st, 0);
+    }
+    sqlite3_finalize(st); sqlite3_close(db);
+    return s4;
+}
+int wt_db_read_outdoor(double *temp, double *humid, double *press, double *wind) {
+    if (!temp || !humid || !press || !wind) return -1;
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_stmt *st = NULL;
+    int found = 0;
+    if (sqlite3_prepare_v2(db, "SELECT temperature, humidity, pressure_msl, wind_speed FROM outdoor ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            *temp  = sqlite3_column_double(st, 0);
+            *humid = sqlite3_column_double(st, 1);
+            *press = sqlite3_column_double(st, 2);
+            *wind  = sqlite3_column_double(st, 3);
+            if (sqlite3_column_type(st, 0) != SQLITE_NULL) found++;
+            if (sqlite3_column_type(st, 1) != SQLITE_NULL) found++;
+            if (sqlite3_column_type(st, 2) != SQLITE_NULL) found++;
+            if (sqlite3_column_type(st, 3) != SQLITE_NULL) found++;
+        }
+    }
+    sqlite3_finalize(st); sqlite3_close(db);
+    return (found >= 2) ? 0 : -1;
+}
