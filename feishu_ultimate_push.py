@@ -652,9 +652,9 @@ def _section_today(daily: Dict, hourly: Dict, today: datetime.date,
     i = 0  # 今日
     wx = daily['weather_code'][i]
     rain = _safe_float(daily['precipitation_sum'][i])
-    rain_prob = _safe_int(daily['precipitation_probability_max'][i])
-    wind_max = _safe_float(daily['wind_speed_10m_max'][i])
-    wind_dom = _safe_float(daily['wind_direction_10m_dominant'][i])
+    rain_prob = _safe_int(daily.get('precipitation_probability_max', [0]*len(times))[i])
+    wind_max = _safe_float(daily.get('wind_speed_10m_max', [0]*len(times))[i])
+    wind_dom = _safe_float(daily.get('wind_direction_10m_dominant', [0]*len(times))[i])
     T_max = _safe_float(daily['temperature_2m_max'][i])
     T_min = _safe_float(daily['temperature_2m_min'][i])
 
@@ -1236,26 +1236,158 @@ def _section_footer(ult: Optional[Dict], alerts: List[str],
     return L
 
 def get_aviation_summary() -> List[str]:
-    """读航空风险评估报告, 提取核心结论"""
+    """
+    长水机场 ZPPP 运行风险评估 (CCAR-121 飞行及地面运行)
+    数据源: /root/data/fusion/aviation_report.txt (由 go_aviation / airport_report 生成)
+    主推送精简卡 v3.0 的一段; 卡片定长, 控制在 6 行内
+    """
     path = '/root/data/fusion/aviation_report.txt'
     if not os.path.exists(path):
-        return ['  ⚠ 航空评估暂不可用']
+        return ['  ⚠ 航空评估报告暂不可用 (等待机场生成器)']
+
     try:
         with open(path) as f:
             text = f.read()
-        lines = []
-        for line in text.split('\n'):
-            if '推荐跑道' in line:
-                lines.append(f'  🛫 {line.strip()}')
-            elif '备降场评估' in line:
-                lines.append(f'  🛬 {line.strip()}')
-            elif '雷暴' in line and ':' in line:
-                lines.append(f'  ⛈ {line.strip()}')
-            elif '积冰' in line and ':' in line:
-                lines.append(f'  ❄️ {line.strip()}')
-        return lines if lines else ['  ✅ 航空评估: 无特殊天气']
     except Exception as e:
         return [f'  ⚠ 航空评估读取失败: {e}']
+
+    import re
+    lines = []
+
+    # ── 1. 推荐跑道 ──
+    rwy_m = re.search(r'推荐跑道:\s*(\S+)\s*\(([^)]+)\)', text)
+    if rwy_m:
+        lines.append(f'  🛬 推荐跑道: {rwy_m.group(1)} ({rwy_m.group(2)})')
+
+    # ── 2. 风/能见度/温度 ── (METAR或当前天气段)
+    # 风向/风速/能见度
+    cur_block = re.search(r'── 当前天气 ──(.*?)(?:──|\Z)', text, re.S)
+    metar_offline = '暂无实时报文' in text
+    if cur_block and not metar_offline:
+        seg = cur_block.group(1)
+        temp_m  = re.search(r'温度:\s*([\-\d.]+)°?C', seg)
+        wind_m  = re.search(r'风[向速]*:\s*(\d+)°\s*\|\s*风速:\s*(\d+\.?\d*)\s*(kt|m/s)?', seg)
+        vis_m   = re.search(r'能见度:\s*(\d+)\s*m', seg)
+        if temp_m and wind_m:
+            ts = f'{temp_m.group(1)}°C'
+            wd, ws, wu = wind_m.groups()
+            unit = wu or 'kt'
+            wd_int = int(wd)
+            ws_val = float(ws)
+            wind_str = f'风{wd}°/{ws}{unit}'
+            if wd_int == 0 and ws_val < 1:
+                wind_str += '·静风'
+            lines.append(f'  🌬️ {wind_str} · 温{ts} · '
+                         f'能见度{vis_m.group(1) if vis_m else "?"}m')
+
+    # ── 2b. METAR实时 fallback: 报告里 METAR 离线时, 用 flight_ops 拉AWC ──
+    if metar_offline:
+        try:
+            import importlib
+            fo = importlib.import_module('flight_ops')
+            fo_res = fo.analyze()
+            if fo_res.get('ok'):
+                lines.append(f'  🌬️ AWC实时: {fo_res.get("wind_str","?")} · '
+                             f'{fo_res.get("temp_dewp","?")} · '
+                             f'visib{fo_res.get("visib_display","?")}SM · '
+                             f'CAT {fo_res["cat_color"]}{fo_res["flight_cat"]}')
+                if fo_res.get('risks'):
+                    for rk in fo_res['risks'][:2]:
+                        lines.append(f'  ⚠ AWC: {rk}')
+        except Exception as _e:
+            lines.append(f'  ⚠ AWC fallback 失败: {_e}')
+
+    # ── 3. 签派/侧风/顺风限制 ──
+    sig_block = re.search(r'── 签派评估 ──(.*?)(?:──|\Z)', text, re.S)
+    if sig_block:
+        cross = re.search(r'侧风.*?(\d+)kt.*?限制(\d+)kt', sig_block.group(1))
+        tail  = re.search(r'顺风.*?(\d+)kt.*?(\d+)kt', sig_block.group(1))
+        ok_cross = '✅' if cross and int(cross.group(1)) < int(cross.group(2)) else '⚠'
+        ok_tail  = '✅' if tail and int(tail.group(1)) < int(tail.group(2)) else '⚠'
+        lines.append(f'  ✈️ 签派: 侧风{ok_cross} 顺风{ok_tail}')
+
+    # ── 4. 备降场可用数 ──
+    alt_m = re.search(r'🟢 可用:\s*(\d+)\s*\|\s*🔴 不可用:\s*(\d+)', text)
+    if alt_m:
+        n_ok, n_bad = alt_m.groups()
+        lines.append(f'  🛬 备降场: {n_ok}可用 {n_bad}不可用 (CCAR≥800m)')
+
+    # ── 5. 雷暴 / 积冰 ──
+    flt_block = re.search(r'── 飞行评估 ──(.*?)(?:──|\Z)', text, re.S)
+    if flt_block:
+        seg = flt_block.group(1)
+        ts_m = re.search(r'雷暴:\s*(.+?)(?:\n|$)', seg)
+        ice_m = re.search(r'积冰:\s*(.+?)(?:\n|$)', seg)
+        if ts_m:
+            ts_clean = re.sub(r'\s+', '', ts_m.group(1))[:30]
+            if '无' in ts_clean:
+                lines.append(f'  ✅ 雷暴: 无')
+            else:
+                lines.append(f'  ⛈ 雷暴: {ts_clean}')
+        if ice_m:
+            ice_clean = re.sub(r'\s+', '', ice_m.group(1))[:30]
+            if '无' in ice_clean:
+                lines.append(f'  ✅ 积冰: 无')
+            else:
+                lines.append(f'  ❄️ 积冰: {ice_clean}')
+
+    # ── 6. 长水飞行及地面运行建议 (核心, 主人原话要求) ──
+    # 根据上面字段自动生成建议
+    advice = _ops_advice(rwy_m, cross, tail, alt_m, flt_block, cur_block)
+    if advice:
+        lines.append(f'  💡 建议: {advice}')
+
+    return lines if lines else ['  ✅ 航空评估: 无特殊天气, 正常运行']
+
+
+def _ops_advice(rwy_m, cross_m, tail_m, alt_m, flt_block, cur_block) -> str:
+    """
+    综合生成"对长水飞行及地面运行的建议"
+    优先级: 雷暴 > 顺风/侧风 > 能见度 > 跑道推荐
+    """
+    bits = []
+
+    # 雷暴/积冰
+    if flt_block:
+        seg = flt_block.group(1)
+        if re.search(r'雷暴:\s*⚠', seg) or re.search(r'雷暴:\s*有', seg):
+            bits.append('雷暴预警·建议暂停起降')
+        if re.search(r'积冰:\s*⚠', seg) or re.search(r'积冰:\s*有', seg):
+            bits.append('积冰风险·除冰后起飞')
+
+    # 顺风/侧风
+    if tail_m and int(tail_m.group(1)) >= int(tail_m.group(2)):
+        bits.append('顺风超标·换跑道或暂停')
+    if cross_m and int(cross_m.group(1)) >= int(cross_m.group(2)):
+        bits.append('侧风超标·建议暂停起降')
+
+    # 备降场
+    if alt_m:
+        n_ok, n_bad = int(alt_m.group(1)), int(alt_m.group(2))
+        if n_ok < 3:
+            bits.append(f'备降场紧张({n_ok}可用)·签派严审')
+        elif n_bad == 0 and n_ok >= 8:
+            bits.append('备降充裕·签派正常')
+
+    # 跑道
+    if rwy_m:
+        bits.append(f'跑道{rwy_m.group(1)}')
+
+    # 温度/能见度
+    if cur_block:
+        seg = cur_block.group(1)
+        temp_m = re.search(r'温度:\s*([\-\d.]+)', seg)
+        if temp_m:
+            t = float(temp_m.group(1))
+            if t <= 0:
+                bits.append('结冰预警·跑道除冰')
+            elif t >= 30:
+                bits.append('高温·性能受限')
+
+    # 默认
+    if not bits:
+        return '天气良好·起降正常·地面运行无限制'
+    return '·'.join(bits[:3])  # 精简到 3 条关键建议
 
 
 def build_message(om: Dict, uno: Optional[Dict], ult: Optional[Dict],
