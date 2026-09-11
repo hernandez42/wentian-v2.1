@@ -142,17 +142,19 @@ def check_pwv_sanity():
     issues = []
     if r:
         pwv, t, h, p, ts = r
-        log(f"  PWV={pwv:.1f}mm T={t:.1f}°C H={h:.0f}% P={p:.0f}hPa")
-        # 海拔2103m合理PWV: 5-40mm
-        if pwv < 5 or pwv > 50:
+        # ⚠ 修复(2026-09-11): 字段为NULL时 f"{None:.1f}" 抛TypeError崩掉整个审计进程
+        pwv_f = f"{pwv:.1f}" if pwv is not None else "?"
+        t_f   = f"{t:.1f}" if t is not None else "?"
+        h_f   = f"{h:.0f}" if h is not None else "?"
+        p_f   = f"{p:.0f}" if p is not None else "?"
+        log(f"  PWV={pwv_f}mm T={t_f}°C H={h_f}% P={p_f}hPa")
+        if pwv is not None and (pwv < 5 or pwv > 50):
             issues.append(f"PWV异常: {pwv:.1f}mm")
             log(f"  ⚠ PWV超出合理范围(5-50mm): {pwv:.1f}mm")
-        # 温度合理性
-        if t < -10 or t > 45:
+        if t is not None and (t < -10 or t > 45):
             issues.append(f"温度异常: {t:.1f}°C")
             log(f"  ⚠ 温度异常: {t:.1f}°C")
-        # 湿度
-        if h < 5 or h > 100:
+        if h is not None and (h < 5 or h > 100):
             issues.append(f"湿度异常: {h:.0f}%")
     else:
         log(f"  ⚠ PWV: 无最近数据")

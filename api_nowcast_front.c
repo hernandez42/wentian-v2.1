@@ -1,4 +1,4 @@
-#include "wentian.h"
+﻿#include "wentian.h"
 #include "api_nowcast.h"
 
 int score_false_cold(int metar_n, /* unused */ const time_t *ts_arr, const double *t_arr,
@@ -60,7 +60,7 @@ int score_false_cold(int metar_n, /* unused */ const time_t *ts_arr, const doubl
 
     if (score >= 20) {
         if (*pos > 0) alert[(*pos)++] = ' ';
-        SAFE_SNPRINTF("❄假冷锋(降温%.1f°C %s降水 V型气压%.1fhPa)",
+        SAFE_SNPRINTF(alert, NOWCAST_ALERT_SIZE, "❄假冷锋(降温%.1f°C %s降水 V型气压%.1fhPa)",
                       temp_drop, has_precip?"有":"无", press_v);
     }
     return score;
@@ -134,7 +134,7 @@ int score_stationary(int metar_n, const time_t *ts_arr, const double *t_arr,
 
     if (score >= 20) {
         if (*pos > 0) alert[(*pos)++] = ' ';
-        SAFE_SNPRINTF("🌫准静止锋(湿度%.0f%% 变温%.1f°C 变压%.1fhPa 降水%d次)",
+        SAFE_SNPRINTF(alert, NOWCAST_ALERT_SIZE, "🌫准静止锋(湿度%.0f%% 变温%.1f°C 变压%.1fhPa 降水%d次)",
                       hum_avg, t_range, p_range, precip_count);
     }
     return score;

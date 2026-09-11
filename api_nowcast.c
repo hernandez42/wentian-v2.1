@@ -90,10 +90,13 @@
 #endif
 
 /* ── 安全snprintf(带pos指针参数) ───────────────────────── */
-#define SAFE_SNPRINTF(fmt, ...) \
+/* ⚠ 修复(2026-09-11): 旧宏 sizeof(alert) 在 char* 形参上恒为8 → 全部告警文案被截断,
+ * nowcast.alert_msg 恒"无显著天气信号"(线上入库1288条实锤)。新宏显式传缓冲区长度,
+ * 与 api_nowcast.h 中统一, 防两处漂移。 */
+#define SAFE_SNPRINTF(alert_buf, alert_size, fmt, ...) \
     do { \
-        int n = snprintf(alert + (*pos), sizeof(alert) - (*pos), fmt, __VA_ARGS__); \
-        if (n > 0 && n < (int)(sizeof(alert) - (*pos))) (*pos) += n; \
+        int _n_ = snprintf((alert_buf) + (*pos), (size_t)((alert_size) - (*pos)), fmt, __VA_ARGS__); \
+        if (_n_ > 0 && _n_ < (int)((alert_size) - (*pos))) (*pos) += _n_; \
     } while (0)
 
 /* ── PWV历史加载 ───────────────────────────────────────── */
@@ -306,7 +309,7 @@ int wt_nowcast_compute(wt_nowcast_t *out) {
     }
 
     /* ── 各天气型独立评分 ─────────────────────────────── */
-    char alert[256] = {0};
+    char alert[NOWCAST_ALERT_SIZE] = {0};
     int pos = 0;
 
     /* 1. 雷暴 (GB/T 4.1.1: 伴有雷声和闪电的天气现象;
@@ -612,7 +615,10 @@ int wt_nowcast_db_init(const char *path) {
         "alert_msg TEXT)";
     sqlite3_exec(db, sql_create, NULL, NULL, NULL);
 
-    /* 逐个添加新列(如果不存在) */
+    /* 逐个添加新列(如果不存在)
+     * ⚠ 修复(2026-09-11): SQLite 不支持 ALTER TABLE ADD COLUMN IF NOT EXISTS
+     * (那是PostgreSQL语法) — 旧语句静默报错被忽略, 全新库会缺列导致后续INSERT失败。
+     * 改为先查 pragma table_info 再决定是否 ALTER。 */
     const char *cols[] = {
         "thunder_score INTEGER DEFAULT 0",
         "squall_score INTEGER DEFAULT 0",
@@ -630,9 +636,22 @@ int wt_nowcast_db_init(const char *path) {
         "shear_wspd_chg REAL DEFAULT 0",
     };
     for (int i = 0; i < (int)(sizeof(cols)/sizeof(cols[0])); i++) {
-        char sql[256];
-        snprintf(sql, sizeof(sql), "ALTER TABLE nowcast ADD COLUMN IF NOT EXISTS %s", cols[i]);
-        sqlite3_exec(db, sql, NULL, NULL, NULL);
+        char col_name[64];
+        const char *sp = strchr(cols[i], ' ');
+        size_t cn_len = sp ? (size_t)(sp - cols[i]) : strlen(cols[i]);
+        if (cn_len >= sizeof(col_name)) cn_len = sizeof(col_name) - 1;
+        memcpy(col_name, cols[i], cn_len);
+        col_name[cn_len] = '\0';
+        sqlite3_stmt *chk;
+        char chk_sql[128];
+        snprintf(chk_sql, sizeof(chk_sql), "SELECT COUNT(*) FROM pragma_table_info('nowcast') WHERE name='%s'", col_name);
+        if (sqlite3_prepare_v2(db, chk_sql, -1, &chk, NULL) == SQLITE_OK &&
+            sqlite3_step(chk) == SQLITE_ROW && sqlite3_column_int(chk, 0) == 0) {
+            char sql[256];
+            snprintf(sql, sizeof(sql), "ALTER TABLE nowcast ADD COLUMN %s", cols[i]);
+            sqlite3_exec(db, sql, NULL, NULL, NULL);
+        }
+        sqlite3_finalize(chk);
     }
 
     sqlite3_close(db);

@@ -164,7 +164,7 @@ static int load_uno_pressure(int hours, double *p_series, int max_n) {
     if (sqlite3_open(ANO_DB, &db) != SQLITE_OK) return -1;
 
     time_t since = time(NULL) - hours * 3600;
-    char since_iso[32];
+    char since_iso[40];  /* ⚠ 修复(2026-09-11): 旧[32]装不下最坏72字节(编译警告实锤) */
     struct tm *tm = gmtime(&since);
     snprintf(since_iso, sizeof(since_iso), "%04d-%02d-%02dT%02d:%02d:%02d",
              tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,

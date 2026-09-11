@@ -215,6 +215,7 @@ def do_evaluate():
 
     new_evals = []
     now_ts = int(datetime.now().timestamp())
+    evaluated_leads = set()  # ⚠ 2026-09-11: 记录本条预报已评估的lead
 
     # 对每个预报记录, 评估1h/3h/6h预测
     for fc in forecasts:
@@ -311,8 +312,23 @@ def do_evaluate():
             }
             if eval_rec['temp_mae'] is not None or eval_rec['press_mae'] is not None:
                 new_evals.append(eval_rec)
+                # 记录该lead已评估, 供下方决定是否标记整体完成
+                evaluated_leads.add(lead_h)
 
-        fc['_evaluated'] = True
+        # ⚠ 修复(2026-09-11): 旧代码无条件 fc['_evaluated']=True — 未到期的lead被
+        # continue跳过后立即标记"已评估", 3h/6h预报永不进入评分(样本系统性只含1h)。
+        # 新逻辑: 只有全部lead(1/3/6h)都过目标时刻才算整条完成;
+        # 或预报本身就没有可评字段也标记完成(避免死记录)。
+        if all(record_ts + lh * 3600 <= now_ts + 3600 for lh in (1, 3, 6)):
+            fc['_evaluated'] = True
+        elif evaluated_leads:
+            # 部分评估过且无新字段可评(如kriging只有气压) → 完成剩余即标记
+            has_any_field = any(
+                (isinstance(fc.get('data', {}), dict) and fc['data'])
+                for _ in [0]
+            )
+            if not has_any_field:
+                fc['_evaluated'] = True
 
     if new_evals:
         db['evaluations'].extend(new_evals)
@@ -413,11 +429,19 @@ def _eval_alerts(db):
     total_tsra = len(tsra_rows)
     alerted = 0
     for tsra_r in tsra_rows:
-        tsra_ts = tsra_r[0]
+        tsra_ts = tsra_r[0] if tsra_r[0] is not None else 0
+        if not tsra_ts:
+            continue
         for r in rows:
-            if abs(int(r[0]) - tsra_ts) <= 1800 and r[1] >= 26:
-                alerted += 1
-                break
+            # ⚠ 修复(2026-09-11): r[0]/r[1] 为NULL时 int(None)/比较抛TypeError
+            try:
+                if r[0] is None or r[1] is None:
+                    continue
+                if abs(int(r[0]) - tsra_ts) <= 1800 and int(r[1]) >= 26:
+                    alerted += 1
+                    break
+            except (TypeError, ValueError):
+                continue
 
     return {
         '预警总次数': sum(levels.values()),

@@ -21,10 +21,15 @@ def roti_run():
             try:
                 entries = json.load(open(os.path.join(lishu_dir, fname)))
                 for e in entries:
-                    if 'scientific_data' in e:
-                        t = e['scientific_data'].get('tec_total_electron_content', 0)
-                        if t and t > 0:
-                            tec_vals.append((e['ts'], t))
+                    # ⚠ 修复(2026-09-11): astral.py 写入的条目结构是
+                    # e['scientific'] (s4/temperature_c等), 旧代码只认
+                    # 'scientific_data'.tec_total_electron_content → astral条目
+                    # 永远被跳过, ROTI恒"数据不足"。兼容两代契约+wentian.db真源:
+                    sd = e.get('scientific_data') or e.get('scientific') or {}
+                    t = (sd.get('tec_total_electron_content')
+                         or sd.get('tec') or e.get('tec'))
+                    if t and t > 0:
+                        tec_vals.append((e['ts'], t))
             except: pass
     
     if os.path.exists(TEC_JSON):

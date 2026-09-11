@@ -1,4 +1,4 @@
-#include "wentian.h"
+﻿#include "wentian.h"
 #include "api_nowcast.h"
 
 int score_thunderstorm(const wt_nowcast_t *nc, char *alert, int *pos,
@@ -45,9 +45,9 @@ int score_thunderstorm(const wt_nowcast_t *nc, char *alert, int *pos,
     if (score >= 20) {
         if (*pos > 0) alert[(*pos)++] = ' ';
         if (has_ts)
-            SAFE_SNPRINTF("⛈雷暴(METAR TS确认! 斜率%.1fmm)", nc->pwv_slope);
+            SAFE_SNPRINTF(alert, NOWCAST_ALERT_SIZE, "⛈雷暴(METAR TS确认! 斜率%.1fmm)", nc->pwv_slope);
         else
-            SAFE_SNPRINTF("⛈雷暴(间接检测 斜率%.1fmm)", nc->pwv_slope);
+            SAFE_SNPRINTF(alert, NOWCAST_ALERT_SIZE, "⛈雷暴(间接检测 斜率%.1fmm)", nc->pwv_slope);
     }
     return score;
 }
@@ -120,7 +120,7 @@ int score_squall_line(int metar_n, const time_t *ts_arr, const double *p_arr,
 
     if (score >= 20) {
         if (*pos > 0) alert[(*pos)++] = ' ';
-        SAFE_SNPRINTF("🌪飑线(气压↑%.1fhPa 风向变%.0f° PWV↓%.1fmm)",
+        SAFE_SNPRINTF(alert, NOWCAST_ALERT_SIZE, "🌪飑线(气压↑%.1fhPa 风向变%.0f° PWV↓%.1fmm)",
                       press_rise_10min, wd_chg, pwv_drop);
     }
     return score;

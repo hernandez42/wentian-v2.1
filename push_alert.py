@@ -202,7 +202,7 @@ PWV: {pwv:.1f}mm ({('↑' if pwv_sl>0 else '↓')}{abs(pwv_sl):.1f}mm/15min)
 温度: {temp:.1f}°C (5min {('↑' if dt>0 else '↓')}{abs(dt):.1f}°C)
 多源异常: {','.join(cross) if cross else '无'}
 
-请直接写出深度分析, 第一句说**机理**(为什么会出现这种天气型), 第二句说**接下来 30 分钟趋势), 如可能第三句说**最大风险点**。直接开始, 不要寒暄。"""
+请直接写出深度分析, 第一句说**机理**(为什么会出现这种天气型), 第二句说**接下来30分钟趋势**, 如可能第三句说**最大风险点**。直接开始, 不要寒暄。"""
 
     try:
         proc = subprocess.run(
@@ -289,8 +289,8 @@ def build_alert(nc, correl=None, google_val=None, llm_analysis='') -> dict:
     level = nc.get('primary_type') or nc.get('warning_level') or nc.get('level', 'CALM')
     icon = ICONS.get(level, '⚠')
     level_cn = LEVEL_CN.get(level, level)
-    ts = nc.get('ts', 0)
-    dt_time = datetime.fromtimestamp(ts).strftime('%m/%d %H:%M')
+    ts = nc.get('ts') or 0  # ⚠ 修复(2026-09-11): 键存在值为null时 fromtimestamp(None) 崩
+    dt_time = datetime.fromtimestamp(ts).strftime('%m/%d %H:%M') if ts else '--'
 
     # ── Mac风格标题 ──────────────────────────────────────
     # 格式: [图标] 问天 · 等级 | 评分
@@ -521,7 +521,6 @@ def main():
     if args.test:
         test_nc = {
             'ts': int(time.time()),
-            'warning_level': 'SQUALL',
             'forecast': '飑线过境',
             'score': 65,
             'pwv_slope_15min': -2.5,

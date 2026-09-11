@@ -207,12 +207,12 @@ def fuse_models(results: dict) -> dict:
 # ── 主函数 ──
 def main():
     print('━' * 50)
-    print('问天 多模型融合预报引擎 v4.0')
+    print('问天 多模型融合预报引擎 v4.1')
     print(f'坐标: {LAT}, {LON} (ZPPP 昆明长水)')
     print(f'时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    
+
     results = {'ts': time.time(), 'models': {}}
-    
+
     # 并行拉取所有模型
     import concurrent.futures
     fetchers = {
@@ -224,39 +224,117 @@ def main():
     }
     if GOOGLE_API_KEY:
         fetchers['wn3'] = fetch_wn3
-    
+
+    # ⚠ 修复(2026-09-11): 旧 as_completed(timeout=60) 小于 wn2 单源最坏耗时
+    # (30s×2重试+退避>60s), 超时抛 TimeoutError 未捕获 → main崩溃且本轮不落盘。
+    # 预算提到120s + 异常兜底, 单源失败不再拖垮全局。
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         future_map = {ex.submit(fn): name for name, fn in fetchers.items()}
-        for future in concurrent.futures.as_completed(future_map, timeout=60):
-            name = future_map[future]
-            try:
-                data = future.result()
-                if data:
-                    results['models'][name] = data
-                    print(f'  ✅ {name} 成功')
-                else:
-                    print(f'  ⚠ {name} 返回空')
-            except Exception as e:
-                print(f'  ⚠ {name} 异常: {e}')
-    
+        try:
+            for future in concurrent.futures.as_completed(future_map, timeout=120):
+                name = future_map[future]
+                try:
+                    data = future.result()
+                    if data:
+                        results['models'][name] = data
+                        print(f'  ✅ {name} 成功')
+                    else:
+                        print(f'  ⚠ {name} 返回空')
+                except Exception as e:
+                    print(f'  ⚠ {name} 异常: {e}')
+        except concurrent.futures.TimeoutError:
+            print('  ⚠ 部分模型抓取超时, 用已到手的继续融合')
+
     # 融合
     print(f'\n  成功获取 {len(results["models"])}/6 个模型')
     fusion = fuse_models(results)
-    
-    # 保存
+
+    # 保存 — ⚠ 修复(2026-09-11): 旧版先写文件后融合, 融合崩溃会留下半截JSON;
+    # 且磁盘满时 json.dump 半截落盘。改为 tmp+rename 原子写。
     results['fusion'] = fusion
     path = f'{OUT_DIR}/multi_model_forecast.json'
-    with open(path, 'w') as f:
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
     print(f'\n✅ 融合预报已保存: {path}')
     print(f'   模型数: {fusion.get("models_count", 0)}')
     print(f'   预报时次: {fusion.get("hours_count", 0)}')
-    
-    # 同时保留旧格式 (兼容推送脚本)
+
+    # ⚠ 修复(2026-09-11): 旧版直接 dump wn2 的 Open-Meteo 原始响应
+    # ({"latitude":...,"hourly":{...}}), 而全部4个下游消费者
+    # (feishu_ultimate_push._section_24h / get_weathernext_summary,
+    #  google_validate, score_forecast) 都期望 {model, forecast_hours[], summary} —
+    # 契约断裂导致"未来24h"段永远空、6天永远走fallback、Google印证永远无数据。
+    # 新版: 写标准契约格式, 4个消费者全部复活。
     if 'wn2' in results['models']:
-        with open(f'{OUT_DIR}/weathernext_forecast.json', 'w') as f:
-            json.dump(results['models']['wn2'], f)
-        print(f'   兼容旧格式: weathernext_forecast.json')
+        wn2_std = _to_standard_forecast(results['models']['wn2'])
+        if wn2_std:
+            p2 = f'{OUT_DIR}/weathernext_forecast.json'
+            t2 = p2 + '.tmp'
+            with open(t2, 'w') as f:
+                json.dump(wn2_std, f, indent=2, ensure_ascii=False)
+            os.replace(t2, p2)
+            print(f'   标准契约: weathernext_forecast.json ({len(wn2_std["forecast_hours"])}时次)')
+
+
+def _to_standard_forecast(wn2_raw):
+    """Open-Meteo WN2 ensemble 原始响应 → 下游统一契约
+    输出: {model, ts, forecast_hours: [{time, temperature_2m, precipitation_mm,
+             pressure_msl_hpa, relative_humidity_pct, cloud_cover_pct,
+             wind_speed_kmh, wind_direction_deg}], summary: {daily: {...}}}
+    注: OM ensemble API 返回 64成员中位(_member后缀为成员值, 顶层无后缀即中位)。
+    时间为 UTC(iso8601), 消费方比较时须转本地时(UTC+8)。"""
+    try:
+        hourly = wn2_raw.get('hourly', {})
+        times = hourly.get('time', [])
+        if not times:
+            return None
+        hours = []
+        for i, t in enumerate(times):
+            def _g(var):
+                vals = hourly.get(var, [])
+                return vals[i] if i < len(vals) and vals[i] is not None else None
+            hours.append({
+                'time': t,
+                'temperature_2m': _g('temperature_2m'),
+                'precipitation_mm': _g('precipitation'),
+                'pressure_msl_hpa': _g('pressure_msl'),
+                'relative_humidity_pct': _g('relative_humidity_2m'),
+                'cloud_cover_pct': _g('cloud_cover'),
+                'wind_speed_kmh': _g('wind_speed_10m'),
+                'wind_direction_deg': _g('wind_direction_10m'),
+                'weather_code': _g('weather_code'),
+            })
+        # daily summary
+        daily = {}
+        for h in hours:
+            day = h['time'][:10]
+            d = daily.setdefault(day, {'temps': [], 'precip': 0.0, 'hours_n': 0})
+            if h['temperature_2m'] is not None:
+                d['temps'].append(h['temperature_2m'])
+            if h['precipitation_mm']:
+                d['precip'] += h['precipitation_mm']
+            d['hours_n'] += 1
+        summary_daily = {}
+        for day, d in sorted(daily.items()):
+            if d['temps']:
+                summary_daily[day] = {
+                    'temp_min': round(min(d['temps']), 1),
+                    'temp_max': round(max(d['temps']), 1),
+                    'precip_sum_mm': round(d['precip'], 1),
+                    'hours_n': d['hours_n'],
+                }
+        return {
+            'model': 'google_weathernext2_ensemble',
+            'ts': int(time.time()),
+            'utc_offset_seconds': wn2_raw.get('utc_offset_seconds', 0),
+            'forecast_hours': hours,
+            'summary': {'daily': summary_daily},
+        }
+    except Exception as e:
+        print(f'  ⚠ 标准格式转换失败: {e}')
+        return None
 
 
 if __name__ == '__main__':

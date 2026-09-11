@@ -42,6 +42,7 @@
 #include <termios.h>
 #include <fcntl.h>
 #include <math.h>
+#include <errno.h>
 #include <sys/stat.h>
 
 /* ── 全局Kalman滤波器状态 ───────────────────────────────── */
@@ -113,11 +114,32 @@ static int nmea_read_gnss(wt_gnss_t *out) {
     cfsetspeed(&tio, B9600);
     tcsetattr(fd, TCSANOW, &tio);
 
+    /* ⚠ 修复(2026-09-11): 旧代码open后立即单次read — 9600bps下一条GGA需~75ms,
+     * 单次立即读几乎必然EAGAIN或半句 → NMEA回退形同虚设。
+     * 新逻辑: 持续读2.5秒(覆盖多个NMEA输出周期), 拼接完整句子流。
+     * ATGM336H 1Hz输出, 2.5s足够收2条GGA+GSV。 */
     char buf[4096] = {0};
-    int n = read(fd, buf, sizeof(buf) - 1);
+    int total = 0;
+    time_t deadline = time(NULL) + 2.5;  /* int overflow-safe */
+    while (time(NULL) < (time_t)deadline && total < (int)sizeof(buf) - 1) {
+        int n = read(fd, buf + total, sizeof(buf) - 1 - total);
+        if (n > 0) {
+            total += n;
+            /* 拼到2条GGA即可提前收工 */
+            int gga_cnt = 0;
+            for (char *q = buf; (q = strstr(q, "GGA")) != NULL; q += 3) gga_cnt++;
+            if (gga_cnt >= 2) break;
+        } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            usleep(50000);  /* 50ms */
+        } else if (n == 0) {
+            usleep(50000);
+        } else {
+            break;  /* 真错误 */
+        }
+    }
     close(fd);
-    if (n <= 0) return -1;
-    buf[n] = '\0';
+    if (total <= 0) return -1;
+    buf[total] = '\0';
 
     /* 解析最新 GGA - 扫描整个缓冲找最后一条GGA(不能用最后一行,那是GSV/GPTXT) */
     out->ts = time(NULL);
@@ -130,7 +152,8 @@ static int nmea_read_gnss(wt_gnss_t *out) {
     }
     if (!latest) return -1;
 
-    if (strstr(latest, "$GNGGA") || strstr(latest, "$GPGGA")) {
+    if (strstr(latest, "$GNGGA") || strstr(latest, "$GPGGA") ||
+        strstr(latest, "$BDGGA") || strstr(latest, "$GBGGA")) {
         /* $xxGGA,time,lat,N,lon,E,fix,sats,hdop,alt,M,... */
         char lat_s[16] = {0}, lat_ns[4] = {0}, lon_s[16] = {0}, lon_ew[4] = {0};
         int fix_q = 0, sats = 0;
@@ -153,6 +176,8 @@ static int nmea_read_gnss(wt_gnss_t *out) {
             out->hdop = hdop;
             out->alt = alt;
             out->altitude_msl = alt;
+            /* ⚠ 修复(2026-09-11): GGA只报总卫星数, 不分GPS/北斗 —
+             * gps_sats/bds_sats 保持0并诚实标注, 不再让下游把0当实测 */
         }
     }
     return out->fix > 0 ? 0 : -1;
@@ -242,6 +267,9 @@ int wentian_collect_all(void) {
 
     printf("\n━━━ 5. AviationWeather 机场实测 (ZPPP长水) ━━━\n");
     wt_metar_t metar = {0};
+    int metar_ok = 0;  /* ⚠ 修复(2026-09-11): METAR失败路径不再保留陈旧解析数据,
+                        * 旧代码失败时 metar 里是几小时前的完整数据, 第16节 Kalman
+                        * 门禁 altim_hpa>0 挡不住 → 旧QNH被当当前观测污染融合链 */
     /* 多源METAR: 先试美国官方API, 不行则用 Open-Meteo/ECMWF */
     if (wt_aviation_metar("ZPPP", &metar) == 0 && metar.obs_time > time(NULL) - 10800) {
         /* 美国官方API有数据且新鲜(<3h), 用官方 */
@@ -249,16 +277,20 @@ int wentian_collect_all(void) {
             metar.temp, metar.wind_dir, metar.wind_speed_kt, metar.altim_hpa);
         printf("     RAW: %s\n", metar.raw);
         wt_db_save_metar(&metar);
+        metar_ok = 1;
         ok++;
-    } else if (wt_metar_fallback_run(&metar) == 0) {
+    } else if (wt_metar_fallback_run(&metar) == 0 && metar.obs_time > time(NULL) - 10800) {
         /* Open-Meteo ECMWF 降级 */
         printf("  ✅ T=%.0f°C 风%d°/%dkt 气压=%.0fhPa (源:ECMWF/Open-Meteo)\n",
             metar.temp, metar.wind_dir, metar.wind_speed_kt, metar.altim_hpa);
         printf("     RAW: %s\n", metar.raw);
         wt_db_save_metar(&metar);
+        metar_ok = 1;
         ok++;
     } else {
-        printf("  ⚠️ 所有METAR源均失败\n");
+        /* ⚠ 修复: 彻底清零, 防陈旧数据流入第16节Kalman融合 */
+        memset(&metar, 0, sizeof(metar));
+        printf("  ⚠️ 所有METAR源均失败, 本轮融合将不含机场气压\n");
         fail++;
     }
 
@@ -418,7 +450,8 @@ int wentian_collect_all(void) {
      * ═══════════════════════════════════════════════════════ */
     printf("\n━━━ 12. 主人UNO机柜 (本地温/湿/压, 证明机柜恒温) ━━━\n");
     wt_uno_t uno = {0};
-    if (wt_local_uno_robust(&uno) == 0) {
+    if (wt_local_uno_robust(&uno) == 0 && uno.ts > 0 &&
+        (time(NULL) - uno.ts) < 600) {  /* ⚠ 修复(2026-09-11): UNO数据须<10min新鲜 */
         time_t now = time(NULL);
         int age = (int)(now - uno.ts);
         printf("  ✅ 机柜温=%.1f°C 湿=%.0f%% 压=%.1fhPa 海平面压=%.1fhPa 天气=%s (数据%d秒前)\n",
@@ -427,7 +460,14 @@ int wentian_collect_all(void) {
         printf("     ⚠ 主人: 机柜温度只能证明机柜恒温, 不能用于室外预测!\n");
         wt_local_save_uno(&uno);
         ok++;
-    } else fail++;
+    } else {
+        if (uno.ts > 0)
+            printf("  ⚠ UNO数据陈旧(%d秒前), 不入库不参与融合\n", (int)(time(NULL) - uno.ts));
+        else
+            printf("  ⚠ UNO数据不可用\n");
+        memset(&uno, 0, sizeof(uno));  /* 防陈旧值流入第16节 */
+        fail++;
+    }
 
     printf("\n━━━ 13. 主人ATGM336H GPS+北斗 (主人海拔校准) ━━━\n");
     wt_gnss_t gnss = {0};
@@ -448,11 +488,13 @@ int wentian_collect_all(void) {
     } else {
         /* 三级缓存: 读local_gnss表上一条有效数据 */
         printf("  ⚠ GPS/北斗离线, 使用缓存数据...\n");
+        int gnss_cached = 0;  /* ⚠ 修复(2026-09-11): 旧代码 if(!ok) fail++ 用全局
+                                * 成功计数器当条件(恒>0), GNSS全链失败永不计入 */
         sqlite3 *db_c;
         if (sqlite3_open(WENTIAN_DB, &db_c) == SQLITE_OK) {
             sqlite3_stmt *st_c;
             if (sqlite3_prepare_v2(db_c,
-                "SELECT lat,lon,alt,fix,gps_sats,bds_sats,pdop,hdop,vdop,gps_snr,bds_snr "
+                "SELECT lat,lon,alt,fix,gps_sats,bds_sats,pdop,hdop,vdop,gps_snr,bds_snr,ts "
                 "FROM local_gnss WHERE fix > 0 ORDER BY ts DESC LIMIT 1",
                 -1, &st_c, NULL) == SQLITE_OK && sqlite3_step(st_c) == SQLITE_ROW) {
                 gnss.lat = sqlite3_column_double(st_c, 0);
@@ -466,14 +508,19 @@ int wentian_collect_all(void) {
                 gnss.vdop = sqlite3_column_double(st_c, 8);
                 gnss.gps_snr = sqlite3_column_double(st_c, 9);
                 gnss.bds_snr = sqlite3_column_double(st_c, 10);
-                printf("  ✅ [缓存] 位置=%.4f°N,%.4f°E 卫星: GPS=%d颗 北斗=%d颗\n",
-                    gnss.lat, gnss.lon, gnss.gps_sats, gnss.bds_sats);
-                ok++;
+                gnss.ts = (time_t)sqlite3_column_int64(st_c, 11);
+                /* 缓存超过2小时, 拿来展示无意义 */
+                if (gnss.ts > 0 && time(NULL) - gnss.ts < 7200) {
+                    printf("  ✅ [缓存] 位置=%.4f°N,%.4f°E 卫星: GPS=%d颗 北斗=%d颗\n",
+                        gnss.lat, gnss.lon, gnss.gps_sats, gnss.bds_sats);
+                    gnss_cached = 1;
+                }
             }
             sqlite3_finalize(st_c);
             sqlite3_close(db_c);
         }
-        if (!ok) fail++;
+        if (gnss_cached) ok++;
+        else fail++;
     }
 
     printf("\n━━━ 14. 主人GNSS电离层 (S4+Klobuchar) ━━━\n");
@@ -537,18 +584,29 @@ int wentian_collect_all(void) {
 
     /* ═══ 16. Kalman气压融合 (UNO+OM+METAR) ═══════════ */
     printf("\n━━━ 16. Kalman气压融合 (UNO+OM+METAR) ━━━\n");
-    if (uno.cabinet_pressure > 0 && outdoor.pressure_msl > 0 && metar.altim_hpa > 0) {
-        double p_uno_sealevel = uno.sea_level_pressure > 0 ? uno.sea_level_pressure : uno.cabinet_pressure;
-        double fused = wt_kf_fuse_pressure(&g_kf_pressure,
-            p_uno_sealevel, outdoor.pressure_msl, metar.altim_hpa);
-        printf("  ✅ 融合气压=%.2fhPa (UNO海平面=%.1f OM=%.1f METAR=%.0f, σ=%.2f)\n",
-            fused, p_uno_sealevel, outdoor.pressure_msl, metar.altim_hpa,
-            kf1d_uncertainty(&g_kf_pressure.kf));
-        wt_db_save_fused_pressure(fused, p_uno_sealevel, outdoor.pressure_msl,
-            metar.altim_hpa, kf1d_uncertainty(&g_kf_pressure.kf));
-        ok++;
-    } else {
-        printf("  ⚠ 气压数据不全, 跳过Kalman融合\n");
+    /* ⚠ 修复(2026-09-11): 三源全需新鲜 — UNO数据须<10min, METAR须本轮成功(见第5节
+     * metar_ok)且obs_time<2h, outdoor压力>0。旧代码只查>0, 陈旧数据畅通无阻。 */
+    {
+        time_t now16 = time(NULL);
+        int uno_fresh = (uno.cabinet_pressure > 0 && uno.ts > 0 &&
+                         (now16 - uno.ts) < 600);
+        int metar_fresh = (metar_ok && metar.altim_hpa > 0 &&
+                           metar.obs_time > 0 && (now16 - metar.obs_time) < 7200);
+        int om_fresh = (outdoor.pressure_msl > 850);  /* 站点压~803也会>0, 须滤 */
+        if (uno_fresh && om_fresh && metar_fresh) {
+            double p_uno_sealevel = uno.sea_level_pressure > 0 ? uno.sea_level_pressure : uno.cabinet_pressure;
+            double fused = wt_kf_fuse_pressure(&g_kf_pressure,
+                p_uno_sealevel, outdoor.pressure_msl, metar.altim_hpa);
+            printf("  ✅ 融合气压=%.2fhPa (UNO海平面=%.1f OM=%.1f METAR=%.0f, σ=%.2f)\n",
+                fused, p_uno_sealevel, outdoor.pressure_msl, metar.altim_hpa,
+                kf1d_uncertainty(&g_kf_pressure.kf));
+            wt_db_save_fused_pressure(fused, p_uno_sealevel, outdoor.pressure_msl,
+                metar.altim_hpa, kf1d_uncertainty(&g_kf_pressure.kf));
+            ok++;
+        } else {
+            printf("  ⚠ 气压源不全或陈旧 (UNO%s OM%s METAR%s), 跳过Kalman融合\n",
+                uno_fresh ? "✓" : "✗", om_fresh ? "✓" : "✗", metar_fresh ? "✓" : "✗");
+        }
     }
 
     /* ═══ 17. GNSS PWV实时反演(C) ═════════════════════ */
@@ -617,12 +675,12 @@ int wentian_collect_all(void) {
 
     /* ═══ 27. 钦天监v3.0 (合一引擎:节气/五行/卦象/星象/ROTI) ═══ */
     printf("\n━━━ 27. 钦天监 v3.0 ━━━\n");
+    int qintianjian_ok = 0;
     {
-        int rc = 0;
-        rc = system("python3 /root/scripts/wentian/imperial_observatory.py 2>/dev/null");
-        if (rc != 0) printf("  ⚠ 钦天监失败 rc=%d\n", rc);
+        int rc = system("python3 /root/scripts/wentian/imperial_observatory.py 2>/dev/null");
+        if (rc != 0) printf("  ⚠ 钦天监失败 rc=%d\n", rc); else qintianjian_ok = 1;
         rc = system("python3 /root/scripts/wentian/astral.py 2>/dev/null");
-        if (rc != 0) printf("  ⚠ 星象失败 rc=%d\n", rc);
+        if (rc != 0) printf("  ⚠ 星象失败 rc=%d\n", rc); else qintianjian_ok = 1;
     /* WeatherNext 3 — 多模型融合引擎(5模型: WN2+ECMWF+GFS+ICON+GEM) */
     /* 每3小时刷新一次 */
     {
@@ -655,11 +713,11 @@ int wentian_collect_all(void) {
     }
 
     /* ═══ 维度计数器 (钦天监特征已读入) ═══════ */
-    ok++;  /* 钦天监算一个维度 */
+    if (qintianjian_ok) ok++;  /* ⚠ 修复(2026-09-11): 旧代码无条件ok++注水 */
 
     printf("\n━━━ 总结 ━━━\n  成功: %d  失败: %d  (共 %d 模块已编排)\n", ok, fail, ok + fail);
     printf("  实际加载模块数随 API 可用性与本地硬件动态变化，已去除固定硬编码计数。\n\n");
-    return 0;
+    return (fail > 0) ? 1 : 0;  /* ⚠ 修复: 旧代码恒return 0, systemd永远看不到真实失败 */
 }
 
 /* ── 打印报告 ──────────────────────────────────────────── */

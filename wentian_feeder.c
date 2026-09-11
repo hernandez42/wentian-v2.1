@@ -20,11 +20,18 @@
 #include <sqlite3.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 
 #define OUT_PATH "/root/data/fusion/wentian_latest.json"
 
+/* ⚠ 修复(2026-09-11): 旧 write_kv 裸塞DB文本进JSON
+ * wentian_latest.json。统一走 json_escape。 */
+static void json_escape(const char *val, char *out, size_t outsz);
 static void write_kv(FILE *f, const char *key, const char *val, int last) {
-    fprintf(f, "    \"%s\": \"%s\"%s\n", key, val, last ? "" : ",");
+    char buf[2048];
+    json_escape(val, buf, sizeof(buf));
+    fprintf(f, "    \"%s\": \"%s\"%s\n", key, buf, last ? "" : ",");
 }
 static void write_kv_num(FILE *f, const char *key, double val, int last) {
     if (isnan(val)) { /* NaN表示字段缺失, 跳过输出 */ return; }
@@ -381,23 +388,27 @@ static int export_one(sqlite3 *db, FILE *out) {
 
     /* 19. 自进化评分 (模块22) — 每个predictor最新一行 */
     fprintf(out, "    \"evolution\": [\n");
-    if (sqlite3_prepare_v2(db, "SELECT ts,predictor,mae_temp,mae_press,total_score,sample_n,note FROM evolution WHERE rowid IN (SELECT MAX(rowid) FROM evolution GROUP BY predictor) ORDER BY predictor", -1, &st, NULL) == SQLITE_OK) {
+    /* ⚠ 修复(2026-09-11): 旧代码 prepare失败时 `[` 永不闭合 → 整个JSON非法。
+     * 空数组也要合法闭合。 */
+    {
         int first = 1;
-        while (sqlite3_step(st) == SQLITE_ROW) {
-            if (!first) fprintf(out, ",\n");
-            first = 0;
-            char esc_note[2048];
-            json_escape((const char*)sqlite3_column_text(st, 6), esc_note, sizeof(esc_note));
-            const unsigned char *pd = sqlite3_column_text(st, 1);
-            fprintf(out, "      {\"predictor\": \"%s\", \"mae_temp\": %.2f, \"mae_press\": %.2f, \"score\": %d, \"samples\": %d, \"note\": \"%s\"}",
-                    pd ? (const char*)pd : "?",
-                    sqlite3_column_double(st, 2), sqlite3_column_double(st, 3),
-                    sqlite3_column_int(st, 4), sqlite3_column_int(st, 5),
-                    esc_note);
+        if (sqlite3_prepare_v2(db, "SELECT ts,predictor,mae_temp,mae_press,total_score,sample_n,note FROM evolution WHERE rowid IN (SELECT MAX(rowid) FROM evolution GROUP BY predictor) ORDER BY predictor", -1, &st, NULL) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                if (!first) fprintf(out, ",\n");
+                first = 0;
+                char esc_note[2048];
+                json_escape((const char*)sqlite3_column_text(st, 6), esc_note, sizeof(esc_note));
+                const unsigned char *pd = sqlite3_column_text(st, 1);
+                fprintf(out, "      {\"predictor\": \"%s\", \"mae_temp\": %.2f, \"mae_press\": %.2f, \"score\": %d, \"samples\": %d, \"note\": \"%s\"}",
+                        pd ? (const char*)pd : "?",
+                        sqlite3_column_double(st, 2), sqlite3_column_double(st, 3),
+                        sqlite3_column_int(st, 4), sqlite3_column_int(st, 5),
+                        esc_note);
+            }
         }
-        fprintf(out, "\n    ],\n");
+        sqlite3_finalize(st);
+        fprintf(out, "\n    ],\n");  /* 无条件闭合 */
     }
-    sqlite3_finalize(st);
 
     /* 20. 多源融合S4引擎 (模块23) */
     fprintf(out, "    \"multisrc_s4\": {\n");
@@ -468,20 +479,39 @@ static int export_one(sqlite3 *db, FILE *out) {
         fclose(rf);
         if (rn > 0) {
             rbuf[rn] = '\0';
-            /* 提取 roti 和 status 字段 */
+            /* ⚠ 修复(2026-09-11): roti.json 由 python json.dump 写出, 格式是
+             * "roti": 0 / "status": "数据不足" (冒号后带空格)。
+             * 旧偏移 +8/+9 假设两种互斥空格风格, 紧凑格式会把12.3解析成2.3。
+             * 新逻辑: 跳过冒号后统一吃空格, 再解析。 */
             const char *r_r = strstr(rbuf, "\"roti\":");
             const char *r_s = strstr(rbuf, "\"status\":");
+            const char *r_n = strstr(rbuf, "\"samples\":");
             if (r_r) {
-                double roti_val = 0;
-                sscanf(r_r + 8, "%lf", &roti_val);
-                write_kv_num(out, "roti", roti_val, 0);
+                r_r = strchr(r_r, ':');
+                if (r_r) { write_kv_num(out, "roti", strtod(r_r + 1, NULL), 0); }
             }
             if (r_s) {
-                char status[32] = {0};
-                sscanf(r_s + 9, "\"%31[^\"]\"", status);
-                write_kv_esc(out, "status", status, 0);
+                r_s = strchr(r_s, ':');
+                if (r_s) {
+                    char status[32] = {0};
+                    const char *q = r_s + 1;
+                    while (*q == ' ') q++;
+                    if (*q == '"') {
+                        sscanf(q, "\"%31[^\"]\"", status);
+                    }
+                    write_kv_esc(out, "status", status, 0);
+                }
             }
-            write_kv_int(out, "samples", 0, 1);  /* last=true */
+            if (r_n) {
+                r_n = strchr(r_n, ':');
+                if (r_n) { write_kv_int(out, "samples", (long)strtod(r_n + 1, NULL), 1); }
+                else write_kv_int(out, "samples", 0, 1);
+            } else {
+                write_kv_int(out, "samples", 0, 1);  /* last=true */
+            }
+        } else {
+            write_kv_num(out, "roti", 0, 0);
+            write_kv_esc(out, "status", "数据不足", 1);
         }
     } else {
         write_kv_num(out, "roti", 0, 0);
@@ -501,17 +531,31 @@ static int export_one(sqlite3 *db, FILE *out) {
         fclose(af);
         if (an > 0) {
             abuf[an] = '\0';
+            /* ⚠ 修复(2026-09-11): watching.json 由 python json.dump(indent=2) 写出,
+             * 键后冒号统一带空格 "detail": "..."。旧代码 strstr找紧凑格式 + sscanf
+             * 要带空格格式, 两种互斥 → detail 在任何格式下都解析不出来。统一:
+             * 定位键 → 跳过冒号与空格 → 解析。 */
             const char *cs = strstr(abuf, "\"celestial_assessment\":");
             if (cs) {
                 char ca[64] = {0};
-                sscanf(cs, "\"celestial_assessment\": \"%63[^\"]\"", ca);
+                const char *q = strchr(cs, ':');
+                if (q) {
+                    q++;
+                    while (*q == ' ') q++;
+                    if (*q == '"') sscanf(q, "\"%63[^\"]\"", ca);
+                }
                 write_kv_esc(out, "celestial_assessment", ca, 0);
             }
             const char *as = strstr(abuf, "\"anomalies\":");
             if (as) {
-                const char *dt = strstr(as, "\"detail\":\"");
+                const char *dt = strstr(as, "\"detail\":");
                 if (dt) {
-                    sscanf(dt, "\"detail\": \"%255[^\"]\"", anote);
+                    const char *q = strchr(dt, ':');
+                    if (q) {
+                        q++;
+                        while (*q == ' ') q++;
+                        if (*q == '"') sscanf(q, "\"%255[^\"]\"", anote);
+                    }
                 }
             }
         }
@@ -619,6 +663,7 @@ static int feeder_once(void) {
     sqlite3 *db;
     if (sqlite3_open("/root/data/wentian.db", &db) != SQLITE_OK) {
         fprintf(stderr, "[feeder] 无法打开 DB: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);  /* ⚠ 修复: open失败也返回句柄, 直接跳过会泄漏 */
         return -1;
     }
 
@@ -632,9 +677,22 @@ static int feeder_once(void) {
         return -1;
     }
     export_one(db, out);
+    /* ⚠ 修复(2026-09-11): 旧代码不查fclose、无fsync — 磁盘满时半截垃圾文件
+     * 被rename原子地替换掉上一份好文件。新逻辑: fflush+fsync失败就保留旧文件。 */
+    if (fflush(out) != 0 || ferror(out) != 0 || fsync(fileno(out)) != 0) {
+        fprintf(stderr, "[feeder] 写入失败(磁盘满?), 保留旧JSON\n");
+        fclose(out);
+        remove(tmp_path);
+        sqlite3_close(db);
+        return -1;
+    }
     fclose(out);
     sqlite3_close(db);
-    rename(tmp_path, OUT_PATH);
+    if (rename(tmp_path, OUT_PATH) != 0) {
+        fprintf(stderr, "[feeder] rename失败: %s\n", strerror(errno));
+        remove(tmp_path);
+        return -1;
+    }
     printf("[feeder] wrote %s\n", OUT_PATH);
     return 0;
 }
@@ -649,6 +707,9 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "once") == 0) return feeder_once();
     if (strcmp(argv[1], "daemon") == 0) {
         int sec = argc >= 3 ? atoi(argv[2]) : 300;
+        /* ⚠ 修复(2026-09-11): atoi("abc")/atoi("0")=0 → sleep(0)忙循环狂刷DB。
+         * 无效值一律回落300秒。 */
+        if (sec <= 0) sec = 300;
         printf("[feeder] daemon mode, period=%ds\n", sec);
         while (1) {
             feeder_once();

@@ -37,6 +37,7 @@ typedef struct {
     double temp; double dew; double altim;
     double wind_dir; double wind_spd_kt;
     double vis_m; char raw[256];
+    time_t obs_ts;      /* 观测时间(新鲜度判定) */
     int valid;
 } metar_data_t;
 
@@ -45,8 +46,12 @@ static metar_data_t fetch_metar_icao(const char *icao) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return m;
     sqlite3_stmt *st;
+    /* ⚠ 修复(2026-09-11): 旧SQL列名 wind_spd_kt/vis 与 metar 表实际列
+     * wind_speed/visib 不符 → prepare静默失败 → ZPPP/备降场METAR永远读不到,
+     * 民航评估自上线起一直在用模型估算值冒充"机场实测"(线上实锤)。
+     * 同时取 ts 做新鲜度判定。 */
     if (sqlite3_prepare_v2(db,
-        "SELECT temp,altim,wind_dir,wind_spd_kt,vis,raw FROM metar "
+        "SELECT temp,altim,wind_dir,wind_speed,visib,raw,ts FROM metar "
         "WHERE icao=? AND raw NOT LIKE 'SYNTHETIC%%' "
         "ORDER BY ts DESC LIMIT 1", -1, &st, NULL) != SQLITE_OK) {
         sqlite3_close(db); return m;
@@ -60,7 +65,11 @@ static metar_data_t fetch_metar_icao(const char *icao) {
         m.vis_m = sqlite3_column_double(st, 4);
         const char *r = (const char*)sqlite3_column_text(st, 5);
         if (r) strncpy(m.raw, r, sizeof(m.raw)-1);
-        m.valid = 1;
+        m.obs_ts = (time_t)sqlite3_column_int64(st, 6);
+        /* 超过2小时的METAR不再当"当前实况"使用 (ZPPP凌晨停报常见) */
+        if (m.obs_ts > 0 && time(NULL) - m.obs_ts < 7200) {
+            m.valid = 1;
+        }
     }
     sqlite3_finalize(st);
     sqlite3_close(db);
@@ -113,6 +122,7 @@ typedef struct {
 static rwy_assess_t assess_runway(int hdg, int len, const char *ils,
                                     double wdir, double wspd_kt, double vis_m,
                                     int rwy_cond) {
+    (void)len;
     rwy_assess_t r = {.heading = hdg, .name = ""};
     double xw, tw;
     calc_wind_comp(wdir, wspd_kt, (double)hdg, &xw, &tw);
@@ -182,6 +192,90 @@ static altn_assess_t assess_alternate(const altn_airport_t *ap) {
     return a;
 }
 
+/* ── METAR天气组词边界检测 ─────────────────────────────── */
+/* METAR天象组是粘合词(TSRA/+TSRABR), 不能用裸strstr("TS")——会误匹配
+ * "GUST"/"LIGHTNING"等无关词, 也不会命中"TSRA"里的"TS"子串判断。
+ * 按词边界匹配: 前面是空格或行首, 后面是空格或行尾。 */
+__attribute__((unused)) static int metar_has_token(const char *raw, const char *tok) {
+    if (!raw || !tok) return 0;
+    size_t tl = strlen(tok);
+    const char *p = raw;
+    while ((p = strstr(p, tok)) != NULL) {
+        int pre_ok = (p == raw) || (p[-1] == ' ') || (p[-1] == '+' || p[-1] == '-');
+        const char *e = p + tl;
+        int post_ok = (*e == '\0') || (*e == ' ') || (*e == '\n');
+        /* 降水组后常跟BR/HZ等: TSRA BR — TSRA后是空格 ✓
+         * 组合组内不匹配: 找"TS"时"TSRA"里TS后是R → 不算独立token,
+         * 但雷暴只要出现含TS的组即算(下述fallthrough) */
+        if (pre_ok && post_ok) return 1;
+        p++;
+    }
+    return 0;
+}
+
+/* 含TS的粘合组检测: TSRA/TSPE/TSSN/VCTS etc. */
+static int metar_has_ts_group(const char *raw) {
+    if (!raw) return 0;
+    /* 词边界: 前是空格/行首/强度符(+/-/VC) */
+    const char *p = raw;
+    while ((p = strstr(p, "TS")) != NULL) {
+        int pre_ok = (p == raw) || (p[-1] == ' ') || (p[-1] == '+' ||
+                     p[-1] == '-' || (p >= raw + 2 && strncmp(p - 2, "VC", 2) == 0));
+        if (pre_ok) return 1;
+        p += 2;
+    }
+    return 0;
+}
+
+/* CB云检测: METAR云组含CB (BKN030CB / OVC015TCU) */
+static int metar_has_cb(const char *raw) {
+    return raw && strstr(raw, "CB") && (strstr(raw, "BKN") || strstr(raw, "OVC") ||
+           strstr(raw, "SCT") || strstr(raw, "FEW") || strstr(raw, "TCU"));
+}
+
+/* ── 密度高度(DA)计算 — CCAR-121 §121.189 高原机场起飞/着陆性能 ── */
+/* ZPPP 2103m: 夏季午后气温25°C时 DA可达 ~3300m, 起飞距离显著增加。
+ * DA = PA + 118.8 * (OAT - ISA_temp_at_PA)  (ft, 近似式)
+ * PA = 场压高 + (1013.25 - QNH) * 30ft/hPa */
+static double calc_density_altitude_ft(double qnh_hpa, double oat_c) {
+    double pa_ft = 6898.0 + (1013.25 - qnh_hpa) * 30.0;  /* ZPPP标高6898ft */
+    double isa_t = 15.0 - 1.98 * (pa_ft / 1000.0);       /* ISA温度(°C) */
+    return pa_ft + 118.8 * (oat_c - isa_t);
+}
+
+/* ── 短临风险读取(nowcast联动) ───────────────────────── */
+typedef struct {
+    int score; int thunder; int shear; int squall;
+    char level[16];
+    time_t ts;
+} nowcast_lite_t;
+
+static int read_nowcast_lite(nowcast_lite_t *nc) {
+    memset(nc, 0, sizeof(*nc));
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_stmt *st;
+    if (sqlite3_prepare_v2(db,
+        "SELECT score,thunder_score,wind_shear_score,squall_score,level,ts "
+        "FROM nowcast ORDER BY ts DESC LIMIT 1", -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_close(db); return -1;
+    }
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        nc->score = sqlite3_column_int(st, 0);
+        nc->thunder = sqlite3_column_int(st, 1);
+        nc->shear = sqlite3_column_int(st, 2);
+        nc->squall = sqlite3_column_int(st, 3);
+        const char *lv = (const char*)sqlite3_column_text(st, 4);
+        if (lv) snprintf(nc->level, sizeof(nc->level), "%s", lv);
+        nc->ts = (time_t)sqlite3_column_int64(st, 5);
+        /* 只信30分钟内的nowcast */
+        if (nc->ts > 0 && time(NULL) - nc->ts > 1800) memset(nc, 0, sizeof(*nc));
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return 0;
+}
+
 /* ── 主入口 ──────────────────────────────────────────────── */
 int wt_aviation_assess(void) {
     double t = NAN, h = NAN, p = NAN, ws = NAN, wd = NAN;
@@ -191,14 +285,15 @@ int wt_aviation_assess(void) {
         return -1;
     }
 
-    /* ZPPP METAR */
+    /* ZPPP METAR (修复列名后真正可用) */
     metar_data_t zppp = fetch_metar_icao("ZPPP");
     double wspd_kt = zppp.valid ? zppp.wind_spd_kt : (ws * 1.944);
     double wdir = zppp.valid ? zppp.wind_dir : wd;
-    double vis_m = estimate_vis(h, precip, cloud, zppp.vis_m > 0 ? zppp.vis_m : vis);
+    double vis_m = zppp.valid ? (zppp.vis_m > 0 ? zppp.vis_m : estimate_vis(h, precip, cloud, vis)) :
+                              estimate_vis(h, precip, cloud, vis);
     int rwy_cond = rwy_condition(t, precip, h);
 
-    /* 双跑道评估 */
+    /* 双跑道评估 (ZPPP: 03/21 3400m, 04/22 4500m CAT II) */
     rwy_assess_t r03 = assess_runway(30, 3400, "CAT I", wdir, wspd_kt, vis_m, rwy_cond);
     r03.name = "03";
     rwy_assess_t r04 = assess_runway(40, 4500, "CAT II", wdir, wspd_kt, vis_m, rwy_cond);
@@ -208,7 +303,7 @@ int wt_aviation_assess(void) {
     rwy_assess_t r22 = assess_runway(220, 4500, "CAT II", wdir, wspd_kt, vis_m, rwy_cond);
     r22.name = "22";
 
-    /* 最佳跑道: 侧风最小的 */
+    /* 最佳跑道: 侧风最小 */
     rwy_assess_t *best = &r21;
     rwy_assess_t *all_rwys[] = {&r03, &r04, &r21, &r22};
     for (int i = 0; i < 4; i++) {
@@ -219,16 +314,25 @@ int wt_aviation_assess(void) {
 
     /* 备降场评估 */
     altn_assess_t altn[MAX_ALTN];
-    int altn_ok = 0, altn_bad = 0;
+    int altn_ok = 0, altn_bad = 0, altn_count = 0;
     for (int i = 0; i < MAX_ALTN; i++) {
         if (!ALTN_AIRPORTS[i].icao || !ALTN_AIRPORTS[i].icao[0]) continue;
         altn[i] = assess_alternate(&ALTN_AIRPORTS[i]);
+        altn_count++;
         if (altn[i].risk_alternate >= RISK_WARNING) altn_bad++;
         else altn_ok++;
     }
 
+    /* 短临联动 (雷暴/风切变 0-30min 风险) */
+    nowcast_lite_t ncl;
+    int ncl_ok = (read_nowcast_lite(&ncl) == 0);
+
+    /* 密度高度 (CCAR-121 §121.189 高原性能) */
+    double qnh = zppp.valid ? zppp.altim : (p > 900 ? p : 1013.25);
+    double da_ft = calc_density_altitude_ft(qnh, t);
+
     /* ── 生成报告 ── */
-    char buf[8192];
+    char buf[10240];
     int pos = 0;
     const char *rn[] = {"✅ 正常", "🟡 关注", "🟠 警告", "🔴 禁止"};
     const char *rc_str[] = {"干跑道", "湿跑道", "⚠ 污染/积冰"};
@@ -236,20 +340,27 @@ int wt_aviation_assess(void) {
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "════════════════════════════════════════════════════\n");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        " ZPPP 长水机场 飞行运行风险评估  v2.0\n");
+        " ZPPP 长水机场 飞行运行风险评估  v3.0 (CCAR-121)\n");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        " 基准: CCAR-121 | 海拔: %dm\n", ZPPP_ELEVATION_M);
+        " 基准: CCAR-121 §121.651/§121.191/§121.189 | 海拔: %dm\n", ZPPP_ELEVATION_M);
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "════════════════════════════════════════════════════\n");
 
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "\n── 当前天气 ──\n");
+        "\n── 当前天气 (源: %s) ──\n",
+        zppp.valid ? "ZPPP METAR实测" : "模型估算(METAR离线)");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   温度: %.1f°C | 湿度: %.0f%% | 气压: %.0fhPa\n", t, h, p);
+        "   温度: %.1f°C | 湿度: %.0f%% | QNH: %.0fhPa\n", t, h, qnh);
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   风向: %.0f° | 风速: %.0fkt | 能见度: %.0fm\n", wdir, wspd_kt, vis_m);
+        "   风向: %.0f° | 风速: %.0fkt | 能见度: %.0fm%s\n", wdir, wspd_kt, vis_m,
+        zppp.valid ? "" : " (估算)");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   ZPPP METAR: %s\n", zppp.valid ? zppp.raw : "暂无实时报文");
+        "   密度高度DA: %.0fft (CCAR-121 §121.189 高原性能)\n", da_ft);
+    if (da_ft > 9000)
+        pos += snprintf(buf+pos, sizeof(buf)-pos,
+            "   ⚠ DA超9000ft: 起降性能显著受限, 按QRH高原程序核查\n");
+    pos += snprintf(buf+pos, sizeof(buf)-pos,
+        "   ZPPP METAR: %s\n", zppp.valid ? zppp.raw : "暂无新鲜报文(<2h)");
 
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "\n── 跑道评估 ──\n");
@@ -276,10 +387,28 @@ int wt_aviation_assess(void) {
         fabs(best->twind) > TWIND_MAX ? "⚠ 超标" : "✅ 正常",
         fabs(best->twind), TWIND_MAX);
 
+    /* ── 短临0-30min雷暴/风切变联动 (钦天监×民航) ── */
+    if (ncl_ok && (ncl.thunder >= 20 || ncl.shear >= 15 || ncl.squall >= 20)) {
+        pos += snprintf(buf+pos, sizeof(buf)-pos,
+            "\n── 短临风险联动 (0-30min) ──\n");
+        pos += snprintf(buf+pos, sizeof(buf)-pos,
+            "   ⛈ 雷暴评分: %d/100 | 💨 风切变: %d/100 | 🌪 飑线: %d/100 (%s)\n",
+            ncl.thunder, ncl.shear, ncl.squall, ncl.level[0] ? ncl.level : "稳定");
+        if (ncl.thunder >= 40)
+            pos += snprintf(buf+pos, sizeof(buf)-pos,
+                "   🔴 短临雷暴风险高: 建议暂停起降 (CCAR-121 §121.659)\n");
+        else if (ncl.thunder >= 20)
+            pos += snprintf(buf+pos, sizeof(buf)-pos,
+                "   🟠 雷暴发展中: 注意PWV/气压趋势, 塔台联动\n");
+        if (ncl.shear >= 40)
+            pos += snprintf(buf+pos, sizeof(buf)-pos,
+                "   🔴 低空风切变风险: 进近机组加强PM监控 (CCAR-97 §97.18)\n");
+    }
+
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "\n── 备降场评估 (CCAR-121 标准≥%.0fm能见度) ──\n", (double)ALTN_VIS_MIN);
+        "\n── 备降场评估 (CCAR-121 §121.191 标准≥%.0fm能见度) ──\n", (double)ALTN_VIS_MIN);
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   🟢 可用: %d | 🔴 不可用: %d\n", altn_ok, altn_bad);
+        "   🟢 可用: %d | 🔴 不可用: %d (共%d场)\n", altn_ok, altn_bad, altn_count);
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "   ── 云南省内 ──\n");
     for (int i = 0; i < MAX_ALTN; i++) {
@@ -305,12 +434,15 @@ int wt_aviation_assess(void) {
 
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "\n── 飞行评估 ──\n");
-    /* 雷暴: 查METAR里是否有TS/CB */
+    /* ⚠ 修复(2026-09-11): 旧判定 strstr("TS") 裸串误配GUST + precip>5&&cloud>80过宽
+     * (5mm雨+80%云≠雷暴)。改为METAR TS组词边界 + CB云 + 短临评分三路证据。 */
     int has_cb = 0;
-    if (zppp.valid && (strstr(zppp.raw, "TS") || strstr(zppp.raw, "CB"))) has_cb = 1;
-    if (precip > 5 && cloud > 80) has_cb = 1;
+    if (zppp.valid && (metar_has_ts_group(zppp.raw) || metar_has_cb(zppp.raw))) has_cb = 1;
+    if (!has_cb && ncl_ok && ncl.thunder >= 40) has_cb = 1;  /* 短临证据 */
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   雷暴: %s\n", has_cb ? "🔴 有雷暴" : "✅ 无");
+        "   雷暴: %s (TS/CB%s%s)\n", has_cb ? "🔴 有雷暴" : "✅ 无",
+        zppp.valid && metar_has_ts_group(zppp.raw) ? "报文确认" : "",
+        (ncl_ok && ncl.thunder >= 40 && !has_cb) ? "" : "");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "   积冰: %s (温度%.1f°C/湿度%.0f%%)\n",
         (t < ICE_TRACE_TEMP_C && h > 80) ? "🟠 有积冰可能" : "✅ 无积冰风险", t, h);
@@ -330,12 +462,13 @@ int wt_aviation_assess(void) {
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "\n── 数据源 ──\n");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   实况: met.no/C引擎 | METAR: %s\n", zppp.valid ? "ZPPP在线" : "离线");
+        "   实况: met.no/C引擎 | METAR: %s | 短临联动: %s\n",
+        zppp.valid ? "ZPPP在线(新鲜)" : "离线",
+        (ncl_ok && ncl.ts > 0) ? "nowcast已接入" : "无");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   能见度: %s\n", zppp.vis_m > 0 ? "METAR实测" : "模型估算");
+        "   能见度: %s\n", zppp.valid ? "METAR实测" : "模型估算");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
-        "   METAR备降场: %d/11个有实时数据\n",
-        (int)(sizeof(altn)/sizeof(altn[0]) - altn_bad));
+        "   METAR备降场: %d/%d个有实时数据\n", altn_count - altn_bad, altn_count);
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "\n════════════════════════════════════════════════════\n");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
@@ -346,8 +479,8 @@ int wt_aviation_assess(void) {
     FILE *f = fopen(AVIATION_REPORT, "w");
     if (f) { fputs(buf, f); fclose(f); }
 
-    printf("  ✅ ZPPP评估 | 推荐%02d号 | 备降场%d/%d可用 | %s\n",
-           best->heading, altn_ok, altn_ok+altn_bad,
+    printf("  ✅ ZPPP评估 | 推荐%02d号 | DA=%.0fft | 备降%d/%d可用 | %s\n",
+           best->heading, da_ft, altn_ok, altn_count,
            has_cb ? "⚠雷暴" : "✅无特殊天气");
     return 0;
 }

@@ -1,4 +1,4 @@
-#include "wentian.h"
+﻿#include "wentian.h"
 #include "api_nowcast.h"
 
 int score_wind_shear(int metar_n, const time_t *ts_arr, const double *wd_arr,
@@ -60,7 +60,7 @@ int score_wind_shear(int metar_n, const time_t *ts_arr, const double *wd_arr,
 
     if (score >= 15) {
         if (*pos > 0) alert[(*pos)++] = ' ';
-        SAFE_SNPRINTF("💨风切变(风向变%.0f° 风速差%.1fm/s %s)",
+        SAFE_SNPRINTF(alert, NOWCAST_ALERT_SIZE, "💨风切变(风向变%.0f° 风速差%.1fm/s %s)",
                       wd_chg, wspd_chg, has_ws?"METAR确认":"");
     }
 

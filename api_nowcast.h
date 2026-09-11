@@ -25,7 +25,7 @@ int score_false_cold(int metar_n, const time_t *ts_arr, const double *t_arr,
 int score_stationary(int metar_n, const time_t *ts_arr, const double *t_arr,
                      const double *p_arr, const char *raw_arr, int raw_len,
                      double *stat_humid_avg, double *stat_press_var,
-                     char *alert, int *pos, double *hum_recent);
+                     char *alert, int *pos, double hum_recent[6]);
 void wt_false_cold_note(char *out, int max_len);
 
 /* 风切变检测 (api_nowcast_wind.c) */
@@ -82,11 +82,17 @@ void wt_metar_precip_level(const char *raw, char *out_level, int max_len,
 #define SHEAR_WIND_SPD_CHG   5.0
 #endif
 
-/* 安全snprintf(带pos指针参数) */
-#define SAFE_SNPRINTF(fmt, ...) \
+#define NOWCAST_ALERT_SIZE 256  /* wt_nowcast_compute 内 alert 缓冲区大小, 与 SAFE_SNPRINTF 配套 */
+
+/* 安全snprintf(带pos指针参数)
+ * ⚠ 修复(2026-09-11): 旧宏用 sizeof(alert), 但所有评分函数收到的 alert 是
+ * char* 形参 → sizeof=8, 任何告警文案(36~345字节)全部被截断, pos 永不前进,
+ * nowcast.alert_msg 恒为"无显著天气信号"(入库1288条无一例外, 线上实锤)。
+ * 新宏显式传入缓冲区总长度, 不再依赖 sizeof。 */
+#define SAFE_SNPRINTF(alert_buf, alert_size, fmt, ...) \
     do { \
-        int n = snprintf(alert + (*pos), sizeof(alert) - (*pos), fmt, __VA_ARGS__); \
-        if (n > 0 && n < (int)(sizeof(alert) - (*pos))) (*pos) += n; \
+        int _n_ = snprintf((alert_buf) + (*pos), (size_t)((alert_size) - (*pos)), fmt, __VA_ARGS__); \
+        if (_n_ > 0 && _n_ < (int)((alert_size) - (*pos))) (*pos) += _n_; \
     } while (0)
 
 #endif /* WENTIAN_NOWCAST_H */

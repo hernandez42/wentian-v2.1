@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 
 OUT = '/root/data/fusion/tec_realtime.json'
 LAT, LON = 25.09917, 102.92667  # 昆明长水
+_LON_ORIGIN = None  # 由IONEX header的LON1字段填充(-180或0), 见extract入口
 
 
 def _fetch_url(url, timeout=15):
@@ -35,6 +36,42 @@ def _fetch_url(url, timeout=15):
 
 def _doy(y, m, d):
     return (datetime(y, m, d) - datetime(y, 1, 1)).days + 1
+
+
+def _decompress(data: bytes):
+    """按魔数解压: gzip(1f 8b) / zlib / .Z(1f 9d, unix LZW — python无内置,
+    用系统 gzip -dc 透明解压, POSIX gzip兼容.Z格式)。绝不把解不开的当文本硬解析。"""
+    if not data or len(data) < 2:
+        return None
+    if data[:2] == b'\x1f\x8b':          # gzip
+        import gzip
+        return gzip.decompress(data)
+    if data[:2] in (b'\x1f\x9d', b'\x1f\xa0'):  # unix compress .Z
+        import subprocess, tempfile, os
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.Z', delete=False) as tf:
+                tf.write(data)
+                tmp = tf.name
+            try:
+                r = subprocess.run(['gzip', '-dc', tmp], capture_output=True, timeout=30)
+                if r.returncode == 0 and r.stdout:
+                    return r.stdout
+                return None
+            finally:
+                os.unlink(tmp)
+        except Exception:
+            return None
+    # 试zlib再裸
+    import zlib
+    try:
+        return zlib.decompress(data, -zlib.MAX_WBITS)
+    except Exception:
+        pass
+    try:
+        import gzip
+        return gzip.decompress(data)
+    except Exception:
+        return None  # 解不开就诚实失败, 不再拿二进制当IONEX文本
 
 
 def parse_ionex_header(data):
@@ -65,8 +102,13 @@ def parse_ionex_header(data):
 
 def extract_tec_at_latlon(data, lat0, lon0):
     """解析 IONEX（WHU格式:纬度切片头+空格分隔整数）"""
+    global _LON_ORIGIN
     if isinstance(data, bytes):
         data = data.decode('ascii', errors='replace')
+    # 先从header拿经度起点(-180或0), 供格点索引用
+    hdr = parse_ionex_header(data)
+    if 'lon_min' in hdr:
+        _LON_ORIGIN = hdr['lon_min'] if hdr['lon_min'] in (-180.0, 0.0, 180.0) else -180.0
     lines = data.split('\n')
     
     in_map = False
@@ -128,7 +170,18 @@ def extract_tec_at_latlon(data, lat0, lon0):
     if best_data:
         nlon = len(best_data)
         lon_step = 360.0 / nlon
-        ci = round((lon0 - (-180)) / lon_step)
+        # ⚠ 修复(2026-09-11): 旧代码硬编码 -180 起点, IONEX存在 -180~180 与
+        # 0~360 两种经度约定(中国GIM源常用后者), 0~360时昆明102.9°E会被当282.9°采样
+        # → 取错格点, TEC张冠李戴。用header解析的起点, 解析不到则探测: 若圆周内
+        # 找不到lon0位置但+360能找到, 自动切换约定。
+        lon_origin = _LON_ORIGIN if _LON_ORIGIN is not None else -180.0
+        ci = round((lon0 - lon_origin) / lon_step)
+        if ci < 0 or ci >= nlon:
+            # 换一种经度约定再试
+            alt_origin = 0.0 if lon_origin == -180.0 else -180.0
+            ci2 = round((lon0 - alt_origin) / lon_step)
+            if 0 <= ci2 < nlon:
+                ci = ci2
         ci = max(0, min(ci, nlon - 1))
         if ci < len(best_data):
             try:
@@ -151,11 +204,12 @@ def fetch_whu():
         url = f'ftp://igs.gnsswhu.cn/pub/whu/MGEX/ionosphere/{dt.year}/{fn}'
         data = _fetch_url(url, timeout=20)
         if data:
-            try:
-                import gzip
-                raw = gzip.decompress(data)
-            except Exception as e:
-                print(f'[fetch_whu] decompress fail for {fn}: {type(e).__name__} {e}')
+            # ⚠ 修复(2026-09-11): .Z 是 unix compress LZW 格式, gzip/zlib python
+            # 模块都解不开 → 旧代码BadGzipFile→换lag天→全失败→TEC恒unavailable。
+            # 新: 按魔数解压(gzip -dc 兼容.Z), 解不开继续回溯。
+            raw = _decompress(data)
+            if raw is None:
+                print(f'[fetch_whu] decompress fail for {fn} (LZW/未知格式)')
                 continue
             tec, status = extract_tec_at_latlon(raw, LAT, LON)
             if tec is not None:
@@ -176,15 +230,9 @@ def fetch_uwm():
     url = f'http://igsiono.uwm.edu.pl/testowy/rapid/imgtmp/igrg{doy:03d}0.{yy:02d}i.Z'
     data = _fetch_url(url)
     if data:
-        try:
-            import zlib
-            raw = zlib.decompress(data, -zlib.MAX_WBITS)
-        except Exception:
-            import gzip
-            try:
-                raw = gzip.decompress(data)
-            except Exception:
-                raw = data
+        raw = _decompress(data)
+        if raw is None:
+            return None
         tec, status = extract_tec_at_latlon(raw, LAT, LON)
         if tec is not None:
             return {'source': 'igrapid_uwm', 'tec': round(tec, 1), 'status': status}

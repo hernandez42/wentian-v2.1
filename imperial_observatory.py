@@ -97,7 +97,9 @@ def solar_term_from_sun_lon(sun_lon):
 
 def solar_term_now():
     # 2026-09-09 修复：改用真实太阳视黄经, 不再用线性DOY近似
-    sun_lon = solar_apparent_longitude(datetime.now())
+    # 2026-09-11 修复：太阳视黄经是物理量须UTC输入 — 用本地时(UTC+8)会偏~0.33°,
+    # 节气换界时刻错8小时(astral.py同款算法已修, 此处漏修)
+    sun_lon = solar_apparent_longitude(datetime.utcnow())
     term_name, term_idx = solar_term_from_sun_lon(sun_lon)
     return term_name, term_idx, sun_lon
 

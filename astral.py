@@ -7,6 +7,7 @@ OD='/root/data/fusion';LD=os.path.join(OD,'lishu');os.makedirs(LD,exist_ok=True)
 def sql(q,d):
  c=sqlite3.connect(d)
  try:r=c.execute(q).fetchone();return r if r else None
+ except Exception:return None  # ⚠ 修复(2026-09-11): 旧版只有try/finally无except, 表缺失/DB锁竞争直接崩daemon
  finally:c.close()
 LM=[('角',0,12),('亢',12,26),('氐',26,42),('房',42,54),('心',54,66),('尾',66,80),('箕',80,94),
     ('斗',94,108),('牛',108,122),('女',122,136),('虚',136,148),('危',148,162),('室',162,176),('壁',176,188),
@@ -39,9 +40,32 @@ def sun(dt):
  ob=23.44;sd=math.degrees(math.asin(math.sin(math.radians(ob))*math.sin(math.radians(sl))))
  m,_,_=rm(sl);return {'ra_deg':round(sl,1),'dec_deg':round(sd,1),'sun_lon_deg':round(sl,1),'mansion':m,'note':f'日在{m}宿'}
 def moon(dt):
+ # ⚠ 修复(2026-09-11): 旧版用线性13.176°/日伪模型, 数月偏差可达数十度,
+ # 却以"真实天象"口吻输出"月在X宿" — 伪计算冒充实测。
+ # 新版: Meeus低精度月球黄经算法(Astronomical Algorithms ch.47简化式),
+ # 精度~0.3°, 朔望/月宿判断天文可用。须UTC输入。
  import math
- rf=datetime(2026,1,1);dy=(dt-rf).total_seconds()/86400;ml=(dy*13.176+180)%360
- m,_,_=rm(ml);sl=solar_apparent_longitude(dt);ph=(ml-sl)%360
+ du=datetime.utcnow()
+ f=(du.hour+(du.minute+du.second/60)/60)/24.0
+ jd=int(365.25*(du.year+4716))+int(30.6001*(du.month+1))+du.day+f+ \
+    (2-int(du.year//100)+int(du.year//400))-1524.5
+ T=(jd-2451545.0)/36525.0
+ # 月球平黄经/平近点角/轨道升交点经度
+ Lp=(218.3164477+481267.88123421*T-0.0015786*T*T)%360.0
+ D =(297.8501921+445267.1114034*T-0.0018819*T*T)%360.0
+ M =(357.5291092+35999.0502909*T-0.0001536*T*T)%360.0
+ Mp=(134.9633964+477198.8675055*T+0.0087414*T*T)%360.0
+ F =(93.2720950+483202.0175233*T-0.0036539*T*T)%360.0
+ # 主要摄动项(Meeus表47.A前6项, 弧度)
+ r_=math.radians
+ lon=Lp+(6.288774*math.sin(r_(Mp))
+        +1.274027*math.sin(r_(2*D-Mp))
+        +0.658314*math.sin(r_(2*D))
+        +0.213618*math.sin(r_(2*Mp))
+        -0.185116*math.sin(r_(M))
+        -0.114336*math.sin(r_(2*F)))
+ ml=lon%360.0
+ m,_,_=rm(ml);sl=solar_apparent_longitude(du);ph=(ml-sl)%360.0
  if ph<45 or ph>=315:pn,pe='朔(新月)','🌑'
  elif ph<90:pn,pe='蛾眉月','🌒'
  elif ph<135:pn,pe='上弦月','🌓'
@@ -69,8 +93,8 @@ def run():
  r=sql("SELECT temp FROM outdoor ORDER BY ts DESC LIMIT 1",WDB)
  rk=sql("SELECT noaa_kp_est FROM external_data ORDER BY ts DESC LIMIT 1",WDB)
  rs=sql("SELECT s4_gps FROM local_iono ORDER BY ts DESC LIMIT 1",WDB)
- rg=sql("SELECT ROUND(AVG(gps_sats),1) FROM gps_log WHERE datetime(ts)>=datetime('now','-1 day')",ADB)
- rb=sql("SELECT ROUND(AVG(bds_sats),1) FROM gps_log WHERE datetime(ts)>=datetime('now','-1 day')",ADB)
+ rg=sql("SELECT ROUND(AVG(gps_sats),1) FROM gps_log WHERE datetime(ts,'unixepoch')>=datetime('now','-1 day')",ADB)
+ rb=sql("SELECT ROUND(AVG(bds_sats),1) FROM gps_log WHERE datetime(ts,'unixepoch')>=datetime('now','-1 day')",ADB)
  t=r[0] if r else None;k=rk[0] if rk else None;sv=rs[0] if rs else None;g=rg[0] if rg else None;b=rb[0] if rb else None
  s=sun(n);m=moon(n);p=fiv(g,b);a=det(t,k,sv)
  sev=[x['severity'] for x in a]

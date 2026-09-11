@@ -170,7 +170,7 @@ Zambretti: {_safe(ms.get('zambretti'))} | OM3h: {_safe(ms.get('openmeteo_3h'))} 
   - suggested_weight_adjustments (str)
   - qintianjian_adjustment_suggestion (str)
   - forecast_tuning (str)
-|- aviation_analysis: 航空运行风险评估 (基于CCAR-121数据)
+- aviation_analysis: 航空运行风险评估 (基于CCAR-121数据)  # ⚠ 修复(2026-09-11): 旧"|- "笔误破坏字段定义格式
   - flight_safety_level (safe/caution/warning/prohibited)
   - recommended_runway (str)
   - crosswind_risk (str)
@@ -205,7 +205,9 @@ def call_llm(prompt: str) -> Optional[str]:
     
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(req, timeout=120, context=_ctx()) as resp:
+            # ⚠ 修复(2026-09-11): 120s×3重试最坏366s > 外层feishu预算 — 倒挂必炸服务。
+            # 单次超时降到45s, 3次最坏~145s, 外层240s预算内。
+            with urllib.request.urlopen(req, timeout=45, context=_ctx()) as resp:
                 result = json.loads(resp.read())
                 content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
                 if content:
@@ -224,7 +226,9 @@ def parse_analysis(llm_output: str) -> Dict[str, Any]:
     except json.JSONDecodeError:
         pass
     # try extracting json block
-    m = re.search(r'```(?:json)?\\s*([\\s\\S]*?)```', llm_output)
+    # ⚠ 修复(2026-09-11): 旧正则 r'```(?:json)?\\s*([\\s\\S]*?)```' 双重转义
+    # (\\s是字面反斜杠+s) → markdown代码块提取分支永不匹配, 全靠大括号兜底
+    m = re.search(r'```(?:json)?\s*([\s\S]*?)```', llm_output)
     if m:
         try:
             return json.loads(m.group(1))

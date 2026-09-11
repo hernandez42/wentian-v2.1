@@ -16,7 +16,7 @@
 输出: /root/data/fusion/google_validation.json
 """
 import json, os, sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
 FUSION_DIR = '/root/data/fusion'
@@ -106,11 +106,13 @@ def extract_now_local(local: Dict[str, Any]) -> Dict[str, Any]:
         met_temp = _safe(met.get('temp'))
         if met_temp is not None and met_temp > -50:
             now['metar_temp'] = met_temp
-        met_p = _safe(met.get('pressure'))
+        # ⚠ 修复(2026-09-11): feeder导出的键是 altim_hpa/wind_speed_kt/visib_m,
+        # 旧代码取 pressure/wind_speed 永远是None → METAR气压从不参与印证
+        met_p = _safe(met.get('altim_hpa'))
         if met_p is not None and met_p > 900:
             now['metar_pressure'] = met_p
         now['metar_wind'] = _safe(met.get('wind_dir'))
-        now['metar_wind_speed'] = _safe(met.get('wind_speed'))
+        now['metar_wind_speed'] = _safe(met.get('wind_speed_kt'))
         now['metar_raw'] = _safe(met.get('raw'))
 
     # UNO机柜
@@ -149,34 +151,38 @@ def extract_now_local(local: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def extract_now_google(google: Dict[str, Any], now_local: Dict) -> List[Dict[str, Any]]:
-    """从 Google 模型中提取当前时刻的预测值"""
+    """从 Google 模型中提取当前时刻的预测值
+    ⚠ 修复(2026-09-11): WeatherNext时间戳是UTC(iso8601), 本地观测是UTC+8 —
+    * 旧代码拿UTC字符串当naive时间与本地比较 → 时间轴错位8小时, 拿"8小时后的预报"
+    *   与"当前实测"比, 黄昏/清晨温差大时产生系统性假异常。
+    * 新逻辑: 解析为UTC datetime再转本地(+8h)比较。"""
     now_google = []
-    now_ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')
+    now_utc = datetime.now(timezone.utc)
+    now_local_naive = now_utc + timedelta(hours=8)  # 昆明 = UTC+8
 
     for model_name in ['weathernext2', 'graphcast']:
         model = google.get(model_name)
         if not model or 'forecast_hours' not in model:
             continue
 
-        # 找最近的预报小时 (匹配当前小时)
+        # 找最近的预报小时 (本地时间轴)
         best_entry = None
-        best_diff = 9999.0
-        now_dt = datetime.strptime(now_ts[:13] + ':00', '%Y-%m-%dT%H:%M')
+        best_diff = 999999.0
         for entry in model['forecast_hours']:
             et = entry.get('time', '')
             if not et:
                 continue
-            # 直接匹配到小时
-            if et[:13] == now_ts[:13]:
-                best_entry = entry
-                break
-            # 否则记录最小时间差
             try:
-                entry_dt = datetime.strptime(et[:16], '%Y-%m-%dT%H:%M')
-                diff = abs((entry_dt - now_dt).total_seconds())
+                # WN2时间为UTC无时区后缀
+                entry_dt = datetime.strptime(et[:19], '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
+                entry_local = entry_dt + timedelta(hours=8)  # → 本地
+                diff = abs((entry_local - now_local_naive).total_seconds())
                 if diff < best_diff:
                     best_diff = diff
                     best_entry = entry
+                # 完全命中当前小时直接用
+                if diff < 1800:
+                    break
             except (ValueError, OSError):
                 continue
 
@@ -236,9 +242,13 @@ def cross_validate(local: Dict, google_now: List[Dict]) -> Dict[str, Any]:
                 result['anomalies'].append(f'[{model_name}] 温度偏差 {diff:.1f}°C (Google {gt}°C vs 本地 {lt}°C)')
 
         # 气压
+        # ⚠ 修复(2026-09-11): 旧fallback链 metar_pressure or pressure_msl —
+        # wentian的outdoor.pressure_msl实为站点压(≈803hPa, 高原2103m),
+        # METAR缺测时拿803与Google MSL(1016)比 → 假210hPa异常直接打崩置信度。
+        # 新链: metar QNH → UNO海压 → (宁缺毋滥)
         gp = gm.get('pressure_msl_hpa')
-        lp = local.get('metar_pressure') or local.get('pressure_msl') or local.get('uno_pressure')
-        if gp is not None and lp is not None:
+        lp = local.get('metar_pressure') or local.get('uno_pressure')
+        if gp is not None and lp is not None and 900 < lp < 1080:
             diff = gp - lp
             comp['fields']['pressure_hpa'] = {
                 'google': round(gp, 1),
