@@ -27,12 +27,37 @@ GOOGLE_VAL_JSON = '/root/data/fusion/google_validation.json'
 ALERT_STATE = '/root/data/fusion/alert_push_state.json'  # 独立去重状态, 勿与其他进程共享alert_state.json
 FEISHU_USER = os.environ.get('FEISHU_USER_ID', 'ou_52a5a07c6c4c825ccb530efe5befcc77')
 
-# ── LLM 深度分析 (2026-09-09 R7) ──────────────────────────────────
-# 用 hermes chat 调本机默认 LLM, 做真深度分析, 插在"核心句"与"预测"之间。
-# 失败/超时/分数过低 → 优雅跳过, 不阻塞推送。
+# ── LLM 深度分析 (2026-09-11 R11 重构) ────────────────────────────
+# 直连 OpenAI 兼容网关 (不走 hermes chat 子进程 — 2026-09-11 实测其挂死在
+# API 调用上, 30s 超时被杀, 分析段静默缺失)。
+# 模型链: kmair 网关 CA/DeepSeek-V4-Flash (实测 2.8s, 快) →
+#         tokenrouter z-ai/glm-5.3-free (推理模型, ~60s, 兜底)。
+# GLM-5.3 是 reasoning 模型: max_tokens 必须 ≥4096 (思考吃 token), 且 content
+# 可能为 None (全被思考吃光) — 读取时必须两处都判。
 LLM_CACHE_PATH = '/root/data/fusion/alert_llm_cache.json'
-LLM_TIMEOUT = 30  # 秒 (实测本机 LLM ~19s, 给 30s 留余量)
+LLM_TIMEOUT = 25          # 主链 DeepSeek 2.8s, 25s 上限
+LLM_FALLBACK_TIMEOUT = 100  # GLM-5.3 推理模型实测 ~60s
 LLM_MIN_SCORE = 20  # 关注级及以上才调 LLM (稳定级免打扰)
+
+# 模型链: (名称, base_url, key_env, model_id, 超时)
+LLM_CHAIN = [
+    ('DeepSeek', 'https://llm-gateway.kmair.net/v1',
+     'HERMES_CUSTOM_LLM_GATEWAY_KMAIR_NET_API_KEY', 'CA/DeepSeek-V4-Flash', LLM_TIMEOUT),
+    ('GLM', 'https://api.tokenrouter.com/v1',
+     'HERMES_CUSTOM_API_TOKENROUTER_COM_API_KEY', 'z-ai/glm-5.3-free', LLM_FALLBACK_TIMEOUT),
+]
+
+
+def _load_env_key(key_env):
+    """从 /root/.hermes/.env 读 API key (key 永不进命令行/日志)。"""
+    try:
+        with open('/root/.hermes/.env') as f:
+            for line in f:
+                if line.startswith(key_env + '='):
+                    return line.split('=', 1)[1].strip()
+    except OSError:
+        pass
+    return None
 
 # ── Mac风格图标 ────────────────────────────────────────────
 ICONS = {
@@ -180,12 +205,15 @@ def analyze_with_llm(nc, correl, google_val):
         return cached
 
     # 拼 prompt: 给 LLM 看所有传感器, 要求写"机理+趋势+风险"三段, ≤200字
-    pwv = nc.get('pwv_current') or 0
+    pwv = nc.get('pwv_current')
     pwv_sl = nc.get('pwv_slope_15min', 0)
-    press = nc.get('press_current') or 0
+    press = nc.get('press_current')
     dp = nc.get('dp_3min', 0)
-    temp = nc.get('temp_current') or 0
+    temp = nc.get('temp_current')
     dt = nc.get('dt_5min', 0)
+    pwv_s = f'{pwv:.1f}mm ({("↑" if pwv_sl>0 else "↓")}{abs(pwv_sl):.1f}mm/15min)' if pwv else '不可用'
+    press_s = f'{press:.1f}hPa (3min {("↑" if dp>0 else "↓")}{abs(dp):.1f}hPa)' if press else '不可用'
+    temp_s = f'{temp:.1f}°C (5min {("↑" if dt>0 else "↓")}{abs(dt):.1f}°C)' if temp is not None else '不可用'
 
     cross = []
     if (correl or {}).get('sdr_active'): cross.append('SDR')
@@ -193,75 +221,71 @@ def analyze_with_llm(nc, correl, google_val):
     if (correl or {}).get('uno_pressure_change'): cross.append('UNO气压')
     if (correl or {}).get('uno_temp_change'): cross.append('UNO温度')
 
-    prompt = f"""你是问天气象站短临分析专家。**只输出一段分析**（1-3句, 总字数≤200汉字, 不要换行, 不带emoji, 不带列表符号, 不重述"建议行动"）。
+    prompt = f"""你是问天气象站短临分析专家。**只输出一段分析**（1-3句, 总字数≤200汉字, 不要换行, 不带emoji, 不带列表符号, 不重述"建议行动", 不要输出思考过程）。
 
 地点: 昆明长水 ZPPP
 评分: {score} / 主型: {main_type} / 等级: {nc.get("warning_level","")}
-PWV: {pwv:.1f}mm ({('↑' if pwv_sl>0 else '↓')}{abs(pwv_sl):.1f}mm/15min)
-气压: {press:.1f}hPa (3min {('↑' if dp>0 else '↓')}{abs(dp):.1f}hPa)
-温度: {temp:.1f}°C (5min {('↑' if dt>0 else '↓')}{abs(dt):.1f}°C)
+PWV: {pwv_s}
+气压: {press_s}
+温度: {temp_s}
+降水强度: {nc.get('precip_intensity', '未知')} (1h累计 {nc.get('precip_1h_mm', 0)}mm)
 多源异常: {','.join(cross) if cross else '无'}
 
 请直接写出深度分析, 第一句说**机理**(为什么会出现这种天气型), 第二句说**接下来30分钟趋势**, 如可能第三句说**最大风险点**。直接开始, 不要寒暄。"""
 
-    try:
-        proc = subprocess.run(
-            ['hermes', 'chat', '--query-file', '-', '--oneshot'],
-            input=prompt, capture_output=True, text=True,
-            timeout=LLM_TIMEOUT, env={**os.environ, 'NO_COLOR': '1'}
-        )
-        if proc.returncode != 0:
-            print(f'[push_alert] ⚠ LLM返回码{proc.returncode}: {proc.stderr[:200]}')
-            return ''
-        # hermes chat 输出含装饰边框, 提取 ╭─ ... ╰─ 之间的内容
-        out = proc.stdout
-        # 取最后一块 ╭ ... ╰ 块, 去掉边框
-        text = out
-        for block_marker in ['╭─', '╰─']:
-            pass
-        # 简单提取: 找 ╭ 与 ╰ 之间, 去掉首尾 ╭/╰ 行
-        if '╭' in out and '╰' in out:
-            start = out.find('╭')
-            end = out.find('╰', start)
-            if start >= 0 and end > start:
-                block = out[start:end+1]  # 含 ╰ 结尾
-                lines = []
-                for line in block.split('\n'):
-                    s = line.strip()
-                    # 跳过 ╭/╰ 边框行 (含 ⚕ Hermes 标题)
-                    if s.startswith('╭') or s.startswith('╰'):
-                        continue
-                    # 去掉 │ 边框
-                    if s.startswith('│'):
-                        s = s[1:].rstrip('│').strip()
-                    if s:
-                        lines.append(s)
-                text = ' '.join(lines).strip()
-        # 兜底: 找空行后的内容 (hermes 输出格式: 装饰 / 空行 / 分析 / 空行 / Resume)
-        if not text or 'Resume this session' in text:
-            # 去掉所有 metadata 行 (含 Resume / Session / Duration / Messages)
-            lines = []
-            for line in out.split('\n'):
-                s = line.strip().strip('│').strip()
-                if not s or any(k in s for k in ('Resume', 'Session:', 'Duration:', 'Messages:', 'Query:', 'Initializing', '─', '╭', '╰')):
-                    continue
-                lines.append(s)
-            text = ' '.join(lines).strip()
-        # 限制长度, 避免卡片爆长
-        text = text.strip().strip('。').strip()
-        if len(text) > 400:
-            text = text[:400] + '…'
-        if not text:
-            print(f'[push_alert] ⚠ LLM输出为空')
-            return ''
-        _llm_cache_put(cache_key, text)
-        return text
-    except subprocess.TimeoutExpired:
-        print(f'[push_alert] ⚠ LLM超时({LLM_TIMEOUT}s)')
-        return ''
-    except Exception as e:
-        print(f'[push_alert] ⚠ LLM异常: {e}')
-        return ''
+    # ★R11(2026-09-11): 直连 OpenAI 兼容网关, 模型链回退 DeepSeek → GLM。
+    # 旧 hermes chat 子进程路径已删 — 实测挂在 API 调用, 30s 被杀, 分析段静默缺失。
+    import urllib.request, ssl
+    for model_name, base_url, key_env, model_id, llm_timeout in LLM_CHAIN:
+        api_key = _load_env_key(key_env)
+        if not api_key:
+            print(f'[push_alert] ⚠ {model_name}: 无API key, 跳过')
+            continue
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            body = json.dumps({
+                'model': model_id,
+                'messages': [{'role': 'user', 'content': prompt}],
+                'max_tokens': 4096,       # GLM-5.3 推理模型思考吃token, 必须给足
+                'temperature': 0.3,
+            }).encode()
+            req = urllib.request.Request(
+                base_url.rstrip('/') + '/chat/completions',
+                data=body,
+                headers={'Content-Type': 'application/json',
+                         'Authorization': 'Bearer ' + api_key})
+            t0 = time.time()
+            with urllib.request.urlopen(req, timeout=llm_timeout, context=ctx) as r:
+                resp = json.loads(r.read())
+            cost = time.time() - t0
+
+            # reasoning 模型: content 可能为 None (思考吃光全部 token)
+            choices = resp.get('choices') or []
+            msg = (choices[0].get('message') or {}) if choices else {}
+            text = (msg.get('content') or '').strip()
+
+            finish = (choices[0].get('finish_reason') if choices else '') or ''
+            if not text and finish != 'length':
+                text = (msg.get('reasoning_content') or msg.get('reasoning') or '').strip()
+            if not text:
+                print(f'[push_alert] ⚠ {model_name} 返回空内容 (finish={finish}), 试下一个')
+                continue
+
+            # 推理模型可能把答案写进思考里, 截取"结论后"部分; 普通模型原样
+            text = text.strip().strip('「"').strip()
+            if len(text) > 400:
+                text = text[:400] + '…'
+            _llm_cache_put(cache_key, text)
+            print(f'[push_alert] ✓ {model_name} {cost:.1f}s 返回{len(text)}字')
+            return text
+        except Exception as e:
+            print(f'[push_alert] ⚠ {model_name} 异常: {type(e).__name__}: {e}')
+            continue
+
+    print('[push_alert] ⚠ 模型链全失败, 本次卡片走纯模板(无LLM段)')
+    return ''
 
 # ── 加载数据 ────────────────────────────────────────────────
 def load_json(path):
@@ -600,7 +624,7 @@ def main():
     # Google印证数据
     google_val = load_json(GOOGLE_VAL_JSON)
 
-    # LLM 深度分析 (R7 新增): score >= 20 才调本机 LLM (hermes chat --oneshot)
+    # LLM 深度分析 (R11): score >= 20 才调, 直连网关模型链 DeepSeek→GLM
     # 失败/超时/分数低 → 优雅跳过, 走纯模板卡片
     print(f'[push_alert] 调用LLM深度分析...')
     llm_text = analyze_with_llm(nc, correl, google_val)
