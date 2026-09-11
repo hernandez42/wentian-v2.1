@@ -332,6 +332,23 @@ typedef struct {
     time_t  ts;
 } wt_sdr_t;
 
+/* ── SDR实时频谱采集引擎 (api_sdr_live.c) ──────────────── */
+typedef struct {
+    int     active;         /* 是否正在运行 */
+    double  center_freq;    /* 中心频率 (默认1570e6, 覆盖北斗B1I+GPS L1) */
+    double  bw_hz;          /* 带宽 (默认20MHz) */
+    int     gain;           /* 增益 (默认20dB, RTL-SDR Blog V4已验证) */
+    double  noise_floor;    /* 当前噪底 (dBm, 第5百分位) */
+    double  peak_freq;      /* 峰值频率 (Hz) */
+    double  peak_power;     /* 峰值功率 (dBm) */
+    double  avg_snr;        /* 平均SNR (dB, 峰值-噪底) */
+    time_t  last_update;    /* 最后更新时间 */
+} wt_sdr_live_t;
+
+void wt_sdr_live_init(wt_sdr_live_t *sdr);
+int  wt_sdr_live_scan(wt_sdr_live_t *sdr);
+void wt_sdr_live_stop(wt_sdr_live_t *sdr);
+
 int wt_local_uno(wt_uno_t *out);
 int wt_local_gnss(wt_gnss_t *out);
 int wt_local_iono(wt_iono_t *out);
@@ -499,6 +516,19 @@ int wt_metar_fallback_run(wt_metar_t *out);  /* Open-Meteo/NWS/OGIMET 自动降�
 
 /* ── 等效 TEC 引擎 (api_tec.c) ────────────────────────────── */
 int wt_tec_run(void);                       /* 多源 TEC 融合 (Kp/F10.7/S4→TECU) */
+
+/* ═══ 真实TEC GIM集成引擎 (api_tec_gim.c) ═══════════════════ */
+typedef struct {
+    double  vtec;           /* VTEC (TECU) */
+    double  lat;            /* 插值坐标纬度 */
+    double  lon;            /* 插值坐标经度 */
+    time_t  ts;             /* 时间戳 */
+    char    source[32];     /* 数据源: "NOAA SWPC" 或 "经验估算" */
+    int     valid;          /* 数据是否有效 */
+} wt_tec_gim_t;
+
+int wt_tec_gim_fetch(wt_tec_gim_t *gim, double lat, double lon);   /* NOAA真实TEC获取+插值 */
+int wt_tec_hybrid_run(wt_tec_gim_t *gim);                           /* 先真实TEC → 回退经验估算 */
 
 /* ── 钦天监 (api_imperial.c, C原生替代Python) ──────────── */
 typedef struct {
