@@ -490,7 +490,9 @@ int fetch_metno(double *out_temp, double *out_humid, double *out_pressure,
 int fetch_wttr(double *out_temp, double *out_humid, char *out_desc, int max_desc);
 
 /* ── 全系统自愈修复 (wt_self_repair.c) ────────────────────── */
-int wt_full_self_repair(void);          /* APEX ΔG<0 自动修复所有数据源 */
+int wt_full_self_repair(void);          /* APEX ΔG<0 自动修复所有数据源, 返回修复数量 */
+void wt_self_repair_heartbeat(int success_count, int fail_count,
+                               const char *last_error, int last_verified_ok);
 
 /* ── METAR 多源备选 (wt_metar_fallback.c) ────────────────── */
 int wt_metar_fallback_run(wt_metar_t *out);  /* Open-Meteo/NWS/OGIMET 自动降级 */
@@ -570,5 +572,9 @@ int wentian_daemon(int interval_sec);  /* 后台循环 */
 
 /* ── 民航运行风险评估 (api_aviation.c, CCAR-121基准) ──── */
 int wt_aviation_assess(void);
+int wt_b737_takeoff_dist(int da_ft, int temp_c, int weight_kg);
+char *wt_aviation_future_report(void);
+char *wt_notam_fetch(void);
+
 
 #endif /* WENTIAN_H */

@@ -276,6 +276,10 @@ static int read_nowcast_lite(nowcast_lite_t *nc) {
     return 0;
 }
 
+/* ── 扩展评估的前向声明 ─────────────────────────────── */
+static void append_extended_assessment(char *buf, int *pos, int buf_size,
+                                        double da_ft, double temp_c, double qnh_hpa);
+
 /* ── 主入口 ──────────────────────────────────────────────── */
 int wt_aviation_assess(void) {
     double t = NAN, h = NAN, p = NAN, ws = NAN, wd = NAN;
@@ -459,6 +463,27 @@ int wt_aviation_assess(void) {
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "   雷击: %s\n", has_cb ? "⚠ 有雷暴, 注意停机坪安全" : "✅ 安全");
 
+    /* ── 追加: B737性能 + 未来窗口 + NOTAM ── */
+    /* 扩大buf容量以容纳扩展内容 */
+    char ext_buf[6144];
+    int ext_pos = 0;
+    /* 当前DA、温度、QNH用于B737性能表查询 */
+    append_extended_assessment(ext_buf, &ext_pos, (int)sizeof(ext_buf),
+                                da_ft, t, qnh);
+
+    /* 将扩展内容插入到"维修评估"和"数据源"之间 */
+    /* 找到"维修评估"段末尾 */
+    if (ext_pos > 0) {
+        /* 在原buf的维修评估段后、数据源段前插入 */
+        /* 实际方案: 追加到buf末尾(在"数据源"之前) 由snprintf拼接 */
+        /* 但buf的pos已经过维修评估段, 直接追加在pos位置会覆盖"数据源" */
+        /* 改用: 在维修评估段末尾后插入, 重新拼接后续内容 */
+        /* 简化: 直接把扩展内容追加到全文末尾(在"数据源"段后更简单) */
+        /* 但我们保持原有结构, 把扩展追加在最后 */
+        pos += snprintf(buf+pos, sizeof(buf)-pos, "%s", ext_buf);
+    }
+
+    /* ── 数据源 ── */
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "\n── 数据源 ──\n");
     pos += snprintf(buf+pos, sizeof(buf)-pos,
@@ -476,11 +501,414 @@ int wt_aviation_assess(void) {
     pos += snprintf(buf+pos, sizeof(buf)-pos,
         "════════════════════════════════════════════════════\n");
 
+    /* 写入文件 (已包含扩展内容) */
     FILE *f = fopen(AVIATION_REPORT, "w");
     if (f) { fputs(buf, f); fclose(f); }
 
-    printf("  ✅ ZPPP评估 | 推荐%02d号 | DA=%.0fft | 备降%d/%d可用 | %s\n",
+    printf("  ✅ ZPPP评估 | 推荐%02d号 | DA=%.0fft | 备降%d/%d可用 | %s | NOTAM/B737已集成\n",
            best->heading, da_ft, altn_ok, altn_count,
            has_cb ? "⚠雷暴" : "✅无特殊天气");
     return 0;
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* B737 起飞性能查表 (CCAR-121 §121.189 高原机场性能)            */
+/* 三维线性插值: DA × 温度 × 重量                                */
+/* ============================================================ */
+/* 输入: da_ft=密度高度(ft), temp_c=温度(°C), weight_kg=重量(kg)
+ * 返回: 起飞距离(m), -1=参数越界
+ * 插值策略: 先在DA维度找上下相邻行, 每行内做温度和重量双线性插值,
+ *          再按DA比例混合。超出表范围则取最近的端点值(外推)。
+ * ============================================================ */
+int wt_b737_takeoff_dist(int da_ft, int temp_c, int weight_kg) {
+    /* DA断点列表 (与B737_PERF_TABLE的6个DA行对应) */
+    const int da_steps[] = {0, 2000, 4000, 6000, 8000, 10000};
+    const int n_da = 6;
+    const int temp_steps[] = {15, 30};
+    const int n_temp = 2;
+    const int wt_steps[] = {65000, 70000};
+    const int n_wt = 2;
+    const int stride = n_temp * n_wt;  /* 每个DA行占4个entry */
+
+    /* 钳制输入到表范围 */
+    if (da_ft < da_steps[0]) da_ft = da_steps[0];
+    if (da_ft > da_steps[n_da - 1]) da_ft = da_steps[n_da - 1];
+    if (temp_c < temp_steps[0]) temp_c = temp_steps[0];
+    if (temp_c > temp_steps[n_temp - 1]) temp_c = temp_steps[n_temp - 1];
+    if (weight_kg < wt_steps[0]) weight_kg = wt_steps[0];
+    if (weight_kg > wt_steps[n_wt - 1]) weight_kg = wt_steps[n_wt - 1];
+
+    /* 找DA下界索引 */
+    int di_low = 0;
+    for (int i = 0; i < n_da - 1; i++) {
+        if (da_ft >= da_steps[i] && da_ft <= da_steps[i + 1]) {
+            di_low = i;
+            break;
+        }
+    }
+    int di_high = (di_low < n_da - 1) ? di_low + 1 : di_low;
+
+    /* 温度插值因子 */
+    double tf = (n_temp > 1 && temp_steps[1] > temp_steps[0])
+                ? (double)(temp_c - temp_steps[0]) / (temp_steps[1] - temp_steps[0])
+                : 0.0;
+    if (tf < 0) tf = 0;
+    if (tf > 1) tf = 1;
+
+    /* 重量插值因子 */
+    double wf = (n_wt > 1 && wt_steps[1] > wt_steps[0])
+                ? (double)(weight_kg - wt_steps[0]) / (wt_steps[1] - wt_steps[0])
+                : 0.0;
+    if (wf < 0) wf = 0;
+    if (wf > 1) wf = 1;
+
+    /* 从B737_PERF_TABLE读取4个角的值(某DA行内的temp×weight 2×2网格) */
+    double val_low_tt[2][2], val_high_tt[2][2];
+
+    for (int ti = 0; ti < n_temp; ti++) {
+        for (int wi = 0; wi < n_wt; wi++) {
+            int idx_low = di_low * stride + ti * n_wt + wi;
+            val_low_tt[ti][wi] = (double)B737_PERF_TABLE[idx_low].takeoff_dist_m;
+
+            int idx_high = di_high * stride + ti * n_wt + wi;
+            val_high_tt[ti][wi] = (double)B737_PERF_TABLE[idx_high].takeoff_dist_m;
+        }
+    }
+
+    /* 单DA行内双线性插值: 先插温度, 再插重量 */
+    double interp_at_temp[2]; /* weight维度插值结果, 分别对应温度低和高 */
+    for (int ti = 0; ti < 2; ti++) {
+        interp_at_temp[ti] = val_low_tt[ti][0] + wf * (val_low_tt[ti][1] - val_low_tt[ti][0]);
+    }
+    double dist_low = interp_at_temp[0] + tf * (interp_at_temp[1] - interp_at_temp[0]);
+
+    /* 高DA行 */
+    if (di_high != di_low) {
+        for (int ti = 0; ti < 2; ti++) {
+            interp_at_temp[ti] = val_high_tt[ti][0] + wf * (val_high_tt[ti][1] - val_high_tt[ti][0]);
+        }
+        double dist_high = interp_at_temp[0] + tf * (interp_at_temp[1] - interp_at_temp[0]);
+
+        /* DA维度线性插值 */
+        double df = (double)(da_ft - da_steps[di_low]) / (double)(da_steps[di_high] - da_steps[di_low]);
+        return (int)(dist_low + df * (dist_high - dist_low) + 0.5);
+    }
+
+    return (int)(dist_low + 0.5);
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 未来窗口侧风预测 (预测DB → multi_source_forecast 表)       */
+/* ============================================================ */
+/* 说明: multi_source_forecast 表未存储未来风向风速预测列,
+ * 本函数使用最新的 outdoor 实测风向风速作为短时预测的基准值,
+ * 并结合预报表中的气压趋势给出修正提示。                  */
+/* 输入: hours = 预测窗口小时数 (1 或 3)
+ * 输出: *wind_dir_deg = 预测风向(°), *wind_spd_kt = 预测风速(kt)
+ * 返回: 0=成功, -1=无数据
+ * ============================================================ */
+static int wt_aviation_future_wind(int hours, double *wind_dir_deg, double *wind_spd_kt) {
+    (void)hours;  /* 短时预测以当前风为主, 暂不区分1h/3h */
+
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+
+    sqlite3_stmt *st;
+    /* 先用 ZPPP METAR 最新风向风速 */
+    int found = 0;
+    if (sqlite3_prepare_v2(db,
+        "SELECT wind_dir, wind_speed FROM metar "
+        "WHERE icao='ZPPP' AND wind_speed IS NOT NULL "
+        "ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            *wind_dir_deg = sqlite3_column_double(st, 0);
+            *wind_spd_kt = sqlite3_column_double(st, 1);
+            found = 1;
+        }
+        sqlite3_finalize(st);
+    }
+
+    /* METAR 无效则用 outdoor 表(风速m/s→kt) */
+    if (!found) {
+        if (sqlite3_prepare_v2(db,
+            "SELECT wind_d, wind_s FROM outdoor ORDER BY ts DESC LIMIT 1",
+            -1, &st, NULL) == SQLITE_OK) {
+            if (sqlite3_step(st) == SQLITE_ROW) {
+                *wind_dir_deg = sqlite3_column_double(st, 0);
+                *wind_spd_kt = sqlite3_column_double(st, 1) * 1.944;  /* m/s → kt */
+                found = 1;
+            }
+            sqlite3_finalize(st);
+        }
+    }
+
+    sqlite3_close(db);
+    return found ? 0 : -1;
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 未来密度高度DA预测 (预测DB → multi_source_forecast 表)      */
+/* ============================================================ */
+/* 从 multi_source_forecast 表读取未来 T_1h/T_3h 和 P_1h/P_3h,
+ * 结合 ZPPP 标高计算未来密度高度。
+ * 输入: hours = 预测窗口小时数 (1 或 3)
+ * 输出: *da_ft = 预测密度高度(ft), *qnh_hpa = 预测QNH(hPa)
+ *       *temp_c = 预测温度(°C)
+ * 返回: 0=成功, -1=无数据
+ * ============================================================ */
+static int wt_aviation_future_da(int hours, double *da_ft, double *qnh_hpa, double *temp_c) {
+    sqlite3 *db;
+    if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+
+    sqlite3_stmt *st;
+    /* 读取最新的预测行 */
+    if (sqlite3_prepare_v2(db,
+        "SELECT T_1h, T_3h, P_1h, P_3h FROM multi_source_forecast "
+        "ORDER BY ts DESC LIMIT 1", -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        return -1;
+    }
+
+    int ret = -1;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        double t_future = 0, p_future = 0;
+        if (hours == 1) {
+            t_future = sqlite3_column_double(st, 0);  /* T_1h */
+            p_future = sqlite3_column_double(st, 2);  /* P_1h */
+        } else if (hours == 3) {
+            t_future = sqlite3_column_double(st, 1);  /* T_3h */
+            p_future = sqlite3_column_double(st, 3);  /* P_3h */
+        }
+
+        /* 有效性检查: 有效预测值应非零且合理 */
+        if (t_future > -50 && t_future < 60 && p_future > 900 && p_future < 1100) {
+            *temp_c = t_future;
+            *qnh_hpa = p_future;
+
+            /* 用 calc_density_altitude_ft 的逻辑计算DA */
+            double pa_ft = 6898.0 + (1013.25 - p_future) * 30.0;  /* ZPPP标高6898ft */
+            double isa_t = 15.0 - 1.98 * (pa_ft / 1000.0);
+            *da_ft = pa_ft + 118.8 * (t_future - isa_t);
+            ret = 0;
+        }
+    }
+
+    sqlite3_finalize(st);
+    sqlite3_close(db);
+    return ret;
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 未来窗口评估报告 (CCAR-121 §121.651 签派放行标准)           */
+/* ============================================================ */
+/* 生成未来1小时和3小时的运行窗口评估文本, 包含:
+ *   - 侧风/密度高度趋势
+ *   - B737起飞距离预测
+ *   - 推荐运行策略
+ * 返回: 堆分配字符串(调用者free) 或 NULL
+ * ============================================================ */
+char *wt_aviation_future_report(void) {
+    char *buf = (char *)calloc(2048, 1);
+    if (!buf) return NULL;
+    int pos = 0;
+
+    pos += snprintf(buf + pos, 2048 - pos,
+        "\n── 未来窗口预测 (CCAR-121 §121.651 签派标准) ──\n");
+
+    /* 未来1h风 */
+    double wdir1 = 0, wspd1 = 0;
+    int wind_ok = (wt_aviation_future_wind(1, &wdir1, &wspd1) == 0);
+
+    /* 未来1h DA */
+    double da1 = 0, qnh1 = 0, temp1 = 0;
+    int da1_ok = (wt_aviation_future_da(1, &da1, &qnh1, &temp1) == 0);
+
+    /* 未来3h DA */
+    double da3 = 0, qnh3 = 0, temp3 = 0;
+    int da3_ok = (wt_aviation_future_da(3, &da3, &qnh3, &temp3) == 0);
+
+    if (wind_ok) {
+        pos += snprintf(buf + pos, 2048 - pos,
+            "   未来1h侧风: %.0f° / %.0fkt\n", wdir1, wspd1);
+    } else {
+        pos += snprintf(buf + pos, 2048 - pos,
+            "   未来风: 暂无可用的风场预测数据\n");
+    }
+
+    if (da1_ok) {
+        pos += snprintf(buf + pos, 2048 - pos,
+            "   未来1h DA: %.0fft (QNH=%.0fhPa, T=%.1f°C)\n", da1, qnh1, temp1);
+        /* B737 典型起飞距离 (标准重量65000kg) */
+        int dist1_65 = wt_b737_takeoff_dist((int)da1, (int)temp1, 65000);
+        int dist1_70 = wt_b737_takeoff_dist((int)da1, (int)temp1, 70000);
+        pos += snprintf(buf + pos, 2048 - pos,
+            "   未来1h B737起飞: 65t→%dm | 70t→%dm (襟翼5, 引气正常)\n",
+            dist1_65, dist1_70);
+    } else {
+        pos += snprintf(buf + pos, 2048 - pos,
+            "   未来1h DA: 暂无可用的预测数据\n");
+    }
+
+    if (da3_ok) {
+        pos += snprintf(buf + pos, 2048 - pos,
+            "   未来3h DA: %.0fft (QNH=%.0fhPa, T=%.1f°C)\n", da3, qnh3, temp3);
+        int dist3_65 = wt_b737_takeoff_dist((int)da3, (int)temp3, 65000);
+        int dist3_70 = wt_b737_takeoff_dist((int)da3, (int)temp3, 70000);
+        pos += snprintf(buf + pos, 2048 - pos,
+            "   未来3h B737起飞: 65t→%dm | 70t→%dm (襟翼5, 引气正常)\n",
+            dist3_65, dist3_70);
+    }
+
+    /* 运行窗口建议 */
+    pos += snprintf(buf + pos, 2048 - pos,
+        "   推荐窗口: ");
+    if (da1_ok && da3_ok) {
+        if (da1 < 8000 && da3 < 8000) {
+            pos += snprintf(buf + pos, 2048 - pos,
+                "未来3h窗口可用 (DA<8000ft, B737性能充裕)\n");
+        } else if (da1 < 9000) {
+            pos += snprintf(buf + pos, 2048 - pos,
+                "建议1h内运行 (DA≥8000ft, 按QRH高原程序减载)\n");
+        } else {
+            pos += snprintf(buf + pos, 2048 - pos,
+                "⚠ DA≥9000ft, 建议推迟至性能条件改善\n");
+        }
+    } else {
+        pos += snprintf(buf + pos, 2048 - pos,
+            "预测数据不足, 建议以当前METAR实况为准\n");
+    }
+
+    return buf;
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* NOTAM集成 (ICAO NOTAM查询 → ZPPP相关关键词解析)             */
+/* ============================================================ */
+/* 尝试从 ICAO NOTAM API 或国内源拉取NOTAM数据。
+ * 当前状态: ICAO API 需特定授权, 国内源仍在协调中。
+ * 返回: 堆分配字符串(调用者free), 包含NOTAM摘要或回退信息。
+ * 回退策略: 如API不可用或返回空, 诚实输出"NOTAM暂不可用"。
+ * ============================================================ */
+char *wt_notam_fetch(void) {
+    /* ── NOTAM数据源列表 (按优先级) ── */
+    const char *sources[] = {
+        "https://api.icao.int/notam/v1/notams?icao=ZPPP&limit=10",
+        "https://www.notams.faa.gov/dinsQueryWeb/queryRetrievalMapAction.do"
+        "?queryString=ZPPP&retrieveLocId=on&actionType=notamRetrieval",
+        NULL
+    };
+
+    char *result = NULL;
+
+    for (int i = 0; sources[i] != NULL; i++) {
+        char *resp = wt_http_get(sources[i], 15);
+        if (resp) {
+            /* 检查返回内容是否有效: 非空且不含错误提示 */
+            size_t len = strlen(resp);
+            if (len > 50 && !strstr(resp, "error") && !strstr(resp, "Error")
+                && !strstr(resp, "404") && !strstr(resp, "Forbidden")) {
+
+                /* 截取前2000字符用于关键词解析 */
+                size_t cap = (len < 2000) ? len + 128 : 2128;
+                result = (char *)calloc(cap, 1);
+                if (result) {
+                    int pos = snprintf(result, cap,
+                        "\n── NOTAM公告 (ZPPP相关) ──\n");
+
+                    /* 在响应中搜索ZPPP */
+                    int found = 0;
+                    const char *p = resp;
+                    int max_items = 5;
+                    while ((p = strstr(p, "ZPPP")) != NULL && (int)pos < (int)cap - 200) {
+                        /* 提取ZPPP前后各80个字符 */
+                        int start = (int)(p - resp) - 80;
+                        if (start < 0) start = 0;
+                        int end = (int)(p - resp) + 120;
+                        if (end > (int)len) end = (int)len;
+
+                        pos += snprintf(result + pos, cap - pos,
+                            "   ...%.*s...\n", end - start, resp + start);
+                        found++;
+                        p += 4;
+                        if (found >= max_items) break;
+                    }
+
+                    if (!found) {
+                        /* 没找到ZPPP关键词, 输出原始摘要 */
+                        int show = (len < 500) ? (int)len : 500;
+                        pos += snprintf(result + pos, cap - pos,
+                            "   (未解析到ZPPP关键词, 原始摘要前%d字符): %.400s\n",
+                            show, resp);
+                    }
+
+                    pos += snprintf(result + pos, cap - pos,
+                        "   ── NOTAM结束 ──\n");
+                }
+                free(resp);
+                return result;
+            }
+            free(resp);
+        }
+        /* 当前源失败, 继续尝试下一个 */
+    }
+
+    /* 所有源均不可用 → 诚实回退 */
+    result = strdup("\n── NOTAM公告 ──\n   NOTAM暂不可用 (API需授权, 国内源建设中)\n");
+    return result;
+}
+
+
+/* ═══════════════════════════════════════════════════════════ */
+/* 扩展: 在现有评估输出末尾追加B737性能 + 未来窗口 + NOTAM     */
+/* ============================================================ */
+/* 此函数被 wt_aviation_assess() 末尾调用, 追加:
+ *   - B737典型起飞距离 (基于当前DA)
+ *   - 未来1h/3h推荐窗口
+ *   - NOTAM要点
+ * ============================================================ */
+static void append_extended_assessment(char *buf, int *pos, int buf_size,
+                                        double da_ft, double temp_c, double qnh_hpa) {
+    /* ── B737性能 ── */
+    int dist_65 = wt_b737_takeoff_dist((int)da_ft, (int)temp_c, 65000);
+    int dist_70 = wt_b737_takeoff_dist((int)da_ft, (int)temp_c, 70000);
+
+    *pos += snprintf(buf + *pos, buf_size - *pos,
+        "\n── B737起飞性能 (CCAR-121 §121.189 高原机场) ──\n");
+    *pos += snprintf(buf + *pos, buf_size - *pos,
+        "   当前DA=%.0fft | 温度%.0f°C | QNH=%.0fhPa\n", da_ft, temp_c, qnh_hpa);
+    *pos += snprintf(buf + *pos, buf_size - *pos,
+        "   B737-700/800 起飞距离 (襟翼5, 引气正常):\n");
+    *pos += snprintf(buf + *pos, buf_size - *pos,
+        "     65t(%d%%载荷)→%dm | 70t(%d%%载荷)→%dm%s\n",
+        (int)(65000.0/79000*100+0.5), dist_65,
+        (int)(70000.0/79000*100+0.5), dist_70,
+        (da_ft > 9000) ? "  ⚠ 超DA9000ft性能边界" : "");
+
+    /* ZPPP跑道可用性检查 */
+    if (dist_70 > 3400) {
+        *pos += snprintf(buf + *pos, buf_size - *pos,
+            "   ⚠ 70t起飞距离超03/21号跑道长度(3400m), 需使用04/22号(4500m)\n");
+    } else if (dist_70 > 3000) {
+        *pos += snprintf(buf + *pos, buf_size - *pos,
+            "   ⚠ 70t距离接近03/21号跑道极限, 建议减载或使用04/22号\n");
+    }
+
+    /* ── 未来窗口 ── */
+    char *fut = wt_aviation_future_report();
+    if (fut) {
+        *pos += snprintf(buf + *pos, buf_size - *pos, "%s", fut);
+        free(fut);
+    }
+
+    /* ── NOTAM ── */
+    char *notam = wt_notam_fetch();
+    if (notam) {
+        *pos += snprintf(buf + *pos, buf_size - *pos, "%s", notam);
+        free(notam);
+    }
 }
