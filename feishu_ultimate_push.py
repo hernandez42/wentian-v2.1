@@ -841,9 +841,9 @@ def _section_6day(daily: Dict, wentian: Optional[Dict] = None,
         T_max = _safe_float(daily['temperature_2m_max'][i])
         T_min = _safe_float(daily['temperature_2m_min'][i])
         rain = _safe_float(daily['precipitation_sum'][i])
-        prob = _safe_int(daily['precipitation_probability_max'][i])
-        wind = _safe_float(daily['wind_speed_10m_max'][i])
-        wd_dir = _safe_float(daily['wind_direction_10m_dominant'][i])
+        prob = _safe_int(daily.get('precipitation_probability_max', [0]*len(times))[i])
+        wind = _safe_float(daily.get('wind_speed_10m_max', [0]*len(times))[i])
+        wd_dir = _safe_float(daily.get('wind_direction_10m_dominant', [0]*len(times))[i])
 
         # 智能天气选择 (中央气象台策略)
         if rain >= 5: wx_text, wx_ic = '雨', '🌧'
