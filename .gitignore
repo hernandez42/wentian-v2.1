@@ -4,3 +4,5 @@ score.db
 wentian_test
 wentian
 ml_scintill_ai
+wt_*
+!wt_self_repair.c
