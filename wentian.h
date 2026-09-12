@@ -424,14 +424,13 @@ typedef struct {
     double  confidence;     /* 置信度[0,1] */
     int     lead_time_min;  /* 提前量(分钟) */
     char    pattern_name[32]; /* 天气型名称 */
-    /* 三路原始特征向量(用于事后分析) */
+    /* 三路原始特征向量(用于事后分析, 布局见api_correlate.c文件头) */
     double  sdr_features[16];
     double  gnss_features[8];
     double  uno_features[6];
-    /* 互相关矩阵 */
-    double  corr_sg;        /* SDR-GNSS */
-    double  corr_su;        /* SDR-UNO */
-    double  corr_gu;        /* GNSS-UNO */
+    /* v2.0(2026-09-12): 删除corr_sg/su/gu — 异构特征向量逐元素Pearson
+     * 无物理意义(技能清单已知造假项), 且无任何下游消费者。
+     * 雷暴vs飑线决策改用气压/水汽变化方向判据。 */
 } wt_radar_correl_t;
 
 /* 天气型模式ID(与api_nowcast.c对齐) */

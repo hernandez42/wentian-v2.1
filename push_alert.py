@@ -85,6 +85,15 @@ LEVEL_CN = {
     'RAINSTORM': '暴雨',
 }
 
+# ⚠ 修复(2026-09-12): 软件雷达模式中文映射 — 卡片不再显示英文代码
+PATTERN_CN = {
+    'THUNDER': '雷暴',
+    'SQUALL': '飑线',
+    'FALSE_COLD': '假冷锋',
+    'STATIONARY': '准静止锋',
+    'WIND_SHEAR': '风切变',
+}
+
 # ── 飞书推送 ────────────────────────────────────────────────
 def send_feishu(msg: str) -> bool:
     try:
@@ -433,10 +442,15 @@ def build_alert(nc, correl=None, google_val=None, llm_analysis='') -> dict:
         evidences.append('Google DeepMind 同步检测到一致异常')
 
     # 证据 E: 软件雷达模式
-    if correl and correl.get('matched_pattern') and correl.get('coherence', 0) > 0.5:
-        pattern = correl['matched_pattern']
-        coh = correl['coherence']
-        evidences.append(f'软件雷达识别 {pattern}, 跨源一致率 {coh:.0%}')
+    # ⚠ 修复(2026-09-12): UNKNOWN/NONE不是"识别到的天气型" — 语义是
+    # "三路证据不足以认定任何型"。旧逻辑 `correl.get('matched_pattern')`
+    # 对字符串"UNKNOWN"恒为真, 把"没认出来"推成"识别到UNKNOWN"的假证据。
+    # 现在白名单5种真实型才展示, 并显示中文而非英文代码。
+    if correl:
+        mp = str(correl.get('matched_pattern') or correl.get('pattern_name') or '').upper()
+        if mp in PATTERN_CN and correl.get('coherence', 0) > 0.5:
+            coh = correl['coherence']
+            evidences.append(f'软件雷达识别{PATTERN_CN[mp]}, 跨源一致率 {coh:.0%}')
 
     evidences = evidences[:4]  # 截断到 4 条
 
@@ -524,7 +538,11 @@ def build_alert(nc, correl=None, google_val=None, llm_analysis='') -> dict:
     src_parts = ['问天 C']
     if cross: src_parts.append('+'.join(cross))
     if google_val and google_val.get('confidence') == 'HIGH': src_parts.append('+Google')
-    if (correl or {}).get('coherence', 0) > 0.5: src_parts.append('+雷达')
+    # ⚠ 修复(2026-09-12): 来源"+雷达"标签也要求真实识别到天气型
+    # (UNKNOWN不算雷达贡献, 否则卡片声称雷达参与但雷达啥也没认出来)
+    _mp_src = str((correl or {}).get('matched_pattern') or '').upper()
+    if correl and _mp_src in PATTERN_CN and correl.get('coherence', 0) > 0.5:
+        src_parts.append('+雷达')
     lines.append('来源 ' + ' · '.join(src_parts))
 
     text = '\n'.join(lines)

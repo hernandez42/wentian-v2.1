@@ -244,7 +244,12 @@ int wt_local_sdr(wt_sdr_t *out, int max, int *count) {
     snprintf(gnss_pat, sizeof(gnss_pat), "%s/gnss_*.csv", sweep_dir);
     int gnss_found = 0;
     if (glob(gnss_pat, 0, NULL, &gnss_csv) == 0 && gnss_csv.gl_pathc > 0) {
-        for (size_t i = 0; i < gnss_csv.gl_pathc && *count < max; i++) {
+        /* v2.1(2026-09-12): glob按文件名字典序(升序)返回, 旧代码从头取
+         * 每天最旧3个文件且每周期重复INSERT → local_sdr最新ts永远停在
+         * 当天第一轮扫频(实测09-12停在00:20, 之后200+轮全是重复行)。
+         * 文件名gnss_b1i_l1_HHMMSS零填充 → 倒序迭代即按时间新→旧,
+         * 取最新N个; 配合wt_local_save_sdr的INSERT OR IGNORE去重。 */
+        for (size_t i = gnss_csv.gl_pathc; i-- > 0 && *count < max;) {
             struct stat cs;
             if (stat(gnss_csv.gl_pathv[i], &cs) != 0 || cs.st_size <= 100) continue;
             FILE *fp = fopen(gnss_csv.gl_pathv[i], "r");
@@ -386,6 +391,10 @@ int wt_local_db_init(const char *path) {
         "CREATE TABLE IF NOT EXISTS local_sdr ("
         "  ts INTEGER, file TEXT, band TEXT, noise_dbm REAL,"
         "  peak_mhz REAL, peak_dbm REAL, peak_snr REAL)",
+        /* v2.1(2026-09-12): 唯一索引支持INSERT OR IGNORE — 同一扫频文件
+         * 每周期(6-7min)重复INSERT会累积垃圾行并冻结max(ts)语义 */
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_local_sdr_tsfile"
+        " ON local_sdr(ts, file)",
         "CREATE INDEX IF NOT EXISTS idx_local_uno_ts ON local_uno(ts)",
         "CREATE INDEX IF NOT EXISTS idx_local_gnss_ts ON local_gnss(ts)",
         "CREATE INDEX IF NOT EXISTS idx_local_iono_ts ON local_iono(ts)",
@@ -478,8 +487,10 @@ int wt_local_save_iono(const wt_iono_t *i) {
 int wt_local_save_sdr(const wt_sdr_t *s) {
     sqlite3 *db; sqlite3_stmt *st;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    /* v2.1(2026-09-12): INSERT→INSERT OR IGNORE, 依赖唯一索引
+     * idx_local_sdr_tsfile(ts,file)防同一扫频文件每周期重复入库 */
     if (sqlite3_prepare_v2(db,
-        "INSERT INTO local_sdr VALUES (?,?,?,?,?,?,?)", -1, &st, NULL) == SQLITE_OK) {
+        "INSERT OR IGNORE INTO local_sdr VALUES (?,?,?,?,?,?,?)", -1, &st, NULL) == SQLITE_OK) {
         sqlite3_bind_int64(st, 1, s->ts);
         sqlite3_bind_text(st, 2, s->file, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 3, s->band, -1, SQLITE_TRANSIENT);
