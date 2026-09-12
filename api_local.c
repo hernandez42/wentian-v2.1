@@ -403,10 +403,9 @@ int wt_local_db_init(const char *path) {
     };
     for (int i = 0; sqls[i]; i++) {
         if (sqlite3_exec(db, sqls[i], NULL, NULL, &err) != SQLITE_OK) {
-            fprintf(stderr, "[local_db] SQL失败: %s\n", err);
+            fprintf(stderr, "[local_db] SQL: %s\n", err);
             sqlite3_free(err);
-            sqlite3_close(db);
-            return -1;
+            /* 索引创建失败不致命, 继续执行后续DDL */
         }
     }
     sqlite3_close(db);

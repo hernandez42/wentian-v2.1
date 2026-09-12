@@ -121,6 +121,7 @@ static int load_gnss_snr(double *gps_snrs, int gps_max,
     sqlite3 *db;
     if (lookback_min <= 0) lookback_min = 15;  /* 默认15分钟 */
     if (sqlite3_open(OWNER_DB, &db) != SQLITE_OK) return 0;
+    sqlite3_busy_timeout(db, 1000);
 
     sqlite3_stmt *st;
     /* 用printf插lookback_min (不是strftime %d!), ts是ISO文本与datetime比较 */
@@ -306,6 +307,7 @@ int wt_gnss_ionosphere_revert(wt_gnss_ion_t *out, time_t ts) {
 static int ion_db_save(const wt_gnss_ion_t *p) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_busy_timeout(db, 1000);
 
     const char *sql = "INSERT OR REPLACE INTO local_ionosphere "
         "(ts,s4_gps,s4_bds,samples_gps,samples_bds,"
