@@ -798,6 +798,20 @@ int main(int argc, char **argv) {
         int sec = (argc >= 3) ? atoi(argv[2]) : 300;
         return wentian_daemon(sec);
     }
+    if (strcmp(argv[1], "compass") == 0 || strcmp(argv[1], "寻龙") == 0) {
+        if (argc < 3) {
+            printf("用法: %s compass <航班号>\n", argv[0]);
+            printf("  例: %s compass MU5809\n", argv[0]);
+            printf("  例: %s compass KY3118\n", argv[0]);
+            return 1;
+        }
+        wt_flight_assess_t fa;
+        if (wt_flight_compass_run(argv[2], &fa) == 0) {
+            wt_flight_print(&fa);
+            return 0;
+        }
+        return 1;
+    }
     fprintf(stderr, "未知命令: %s\n", argv[1]);
     return 1;
 }
