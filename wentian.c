@@ -549,7 +549,10 @@ int wentian_collect_all(void) {
 
     printf("\n━━━ 14. 主人GNSS电离层 (S4+Klobuchar) ━━━\n");
     wt_iono_t iono = {0};
-    if (wt_local_iono(&iono) == 0 && iono.s4_gps > 0) {
+    /* ⚠ 修复(2026-09-12): 旧条件 s4_gps>0 把"平静天空S4=0"的合法实测当失败
+     * → local_iono停更 → 自愈引擎每8分钟重启gnss-ionosphere, 3级修复死循环
+     * → repair_emergency刷屏。S4=0是真实物理值(无闪烁), 必须入库。 */
+    if (wt_local_iono(&iono) == 0 && iono.s4_gps >= 0) {
         printf("  ✅ S4: GPS=%.3f 北斗=%.3f (活动: %s)\n",
             iono.s4_gps, iono.s4_bds, iono.activity);
         printf("     SNR: GPS=%.1fdB 北斗=%.1fdB PDOP=%.1f\n",
