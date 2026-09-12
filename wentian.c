@@ -707,8 +707,11 @@ int wentian_collect_all(void) {
             wt_imperial_print(&imp);
             /* 向后兼容: 写JSON供llm_weather_analyst.py读取 */
             wt_imperial_write_json(&imp, WENTIAN_FUSION_DIR "/imperial_enhancement.json");
-            /* 也写astral.json(llm_weather_analyst.py也读它) */
-            /* 注: astral完整功能已合入api_imperial, 保持文件兼容 */
+            /* ⚠ 修复(2026-09-12): 钦天监Python→C迁移时漏了astral.json刷新,
+             * llm_weather_analyst.py读的astral.json停更1天+。C版未含星宿/月宿
+             * 全量输出, 这里补一次轻量astral.py刷新(2s内完成)。 */
+            if (system("timeout 30 python3 /root/scripts/wentian/astral.py >/dev/null 2>&1") != 0)
+                printf("  ⚠ astral.json刷新失败\n");
         } else {
             printf("  ⚠ 钦天监计算失败\n");
         }
