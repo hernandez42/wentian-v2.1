@@ -599,6 +599,40 @@ int wentian_collect_all(void);    /* 同步抓取所有API */
 int wentian_print_report(void);   /* 打印问天报告 */
 int wentian_daemon(int interval_sec);  /* 后台循环 */
 
+/* ═══ 寻龙尺 · 航班实时航空天气风险评估 (api_flight_compass.c) ═══ */
+typedef struct {
+    char flight_no[16];        /* 航班号 */
+    /* 航线 */
+    char dep_icao[8], arr_icao[8];
+    char dep_name[64], arr_name[64];
+    int distance_nm;
+    /* 起飞机场天气评估 */
+    double dep_temp, dep_humid, dep_press, dep_wind_spd, dep_wind_dir, dep_vis;
+    char dep_weather[128], dep_metar_raw[512];
+    int dep_flight_status;       /* 0正常 1注意 2警告 3禁止 */
+    char dep_status_text[128];
+    /* 目的地机场天气评估 */
+    double arr_temp, arr_humid, arr_press, arr_wind_spd, arr_wind_dir, arr_vis;
+    char arr_weather[128], arr_metar_raw[512];
+    int arr_flight_status;
+    char arr_status_text[128];
+    /* 航路风险 */
+    int enroute_risk_score;      /* 0-100 */
+    char enroute_risk_text[256]; /* 航路风险描述 */
+    /* 综合评估 */
+    int overall_score;           /* 0-100, 越高越正常 */
+    char recommendation[256];    /* 建议: 正常/注意/建议延误/建议取消 */
+    char assessment[768];        /* 完整评估文本 */
+    time_t ts;
+} wt_flight_assess_t;
+
+int wt_flight_lookup(const char *flight_no, wt_flight_assess_t *fa);
+int wt_flight_weather(wt_flight_assess_t *fa);
+int wt_flight_assess(wt_flight_assess_t *fa);
+int wt_flight_compass_run(const char *flight_no, wt_flight_assess_t *fa);
+void wt_flight_print(const wt_flight_assess_t *fa);
+int wt_db_save_flight_assess(const wt_flight_assess_t *fa);
+
 /* ── 民航运行风险评估 (api_aviation.c, CCAR-121基准) ──── */
 int wt_aviation_assess(void);
 int wt_b737_takeoff_dist(int da_ft, int temp_c, int weight_kg);

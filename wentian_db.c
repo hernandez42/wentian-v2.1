@@ -76,6 +76,19 @@ int wt_db_init(const char *path) {
         "  g_text TEXT, s_text TEXT, r_text TEXT)",
         "CREATE TABLE IF NOT EXISTS kf_pressure ("
         "  ts INTEGER, fused REAL, p_uno REAL, p_om REAL, p_metar REAL, sigma REAL)",
+        /* 寻龙尺: 航班风险评估表 */
+        "CREATE TABLE IF NOT EXISTS flight_assess ("
+        "  ts INTEGER, flight_no TEXT,"
+        "  dep_icao TEXT, arr_icao TEXT, dep_name TEXT, arr_name TEXT,"
+        "  distance_nm INTEGER,"
+        "  dep_temp REAL, dep_wind_spd REAL, dep_wind_dir REAL, dep_vis REAL,"
+        "  dep_metar_raw TEXT, dep_status INTEGER,"
+        "  arr_temp REAL, arr_wind_spd REAL, arr_wind_dir REAL, arr_vis REAL,"
+        "  arr_metar_raw TEXT, arr_status INTEGER,"
+        "  enroute_risk_score INTEGER, overall_score INTEGER,"
+        "  recommendation TEXT)",
+        "CREATE INDEX IF NOT EXISTS idx_flight_assess_ts ON flight_assess(ts)",
+        "CREATE INDEX IF NOT EXISTS idx_flight_assess_no ON flight_assess(flight_no)",
         "CREATE INDEX IF NOT EXISTS idx_outdoor_ts ON outdoor(ts)",
         "CREATE INDEX IF NOT EXISTS idx_quake_ts ON quake(ts)",
         "CREATE INDEX IF NOT EXISTS idx_kf_ts ON kf_pressure(ts)",
@@ -304,6 +317,34 @@ double wt_db_read_s4(void) {
     sqlite3_finalize(st); sqlite3_close(db);
     return s4;
 }
+int wt_db_save_flight_assess(const wt_flight_assess_t *fa) {
+    DB_SAVE(flight_assess,
+        "INSERT INTO flight_assess VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        sqlite3_bind_int64(st, 1, fa->ts);
+        sqlite3_bind_text(st, 2, fa->flight_no, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 3, fa->dep_icao, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 4, fa->arr_icao, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 5, fa->dep_name, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 6, fa->arr_name, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 7, fa->distance_nm);
+        sqlite3_bind_double(st, 8, fa->dep_temp);
+        sqlite3_bind_double(st, 9, fa->dep_wind_spd);
+        sqlite3_bind_double(st, 10, fa->dep_wind_dir);
+        sqlite3_bind_double(st, 11, fa->dep_vis);
+        sqlite3_bind_text(st, 12, fa->dep_metar_raw, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 13, fa->dep_flight_status);
+        sqlite3_bind_double(st, 14, fa->arr_temp);
+        sqlite3_bind_double(st, 15, fa->arr_wind_spd);
+        sqlite3_bind_double(st, 16, fa->arr_wind_dir);
+        sqlite3_bind_double(st, 17, fa->arr_vis);
+        sqlite3_bind_text(st, 18, fa->arr_metar_raw, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 19, fa->arr_flight_status);
+        sqlite3_bind_int(st, 20, fa->enroute_risk_score);
+        sqlite3_bind_int(st, 21, fa->overall_score);
+        sqlite3_bind_text(st, 22, fa->recommendation, -1, SQLITE_TRANSIENT));
+    return 0;
+}
+
 int wt_db_read_outdoor(double *temp, double *humid, double *press, double *wind) {
     if (!temp || !humid || !press || !wind) return -1;
     sqlite3 *db;
