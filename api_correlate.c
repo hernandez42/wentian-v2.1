@@ -356,7 +356,12 @@ int wt_radar_correlate(wt_radar_correl_t *out, time_t ts, int window_min) {
 /* ── Daemon入口 ──────────────────────────────────────────── */
 int wt_radar_correlate_run(void) {
     wt_radar_correl_t c;
-    if (wt_radar_correlate(&c, time(NULL), CORR_WINDOW_MIN) != 0) return -1;
+    if (wt_radar_correlate(&c, time(NULL), CORR_WINDOW_MIN) != 0) {
+        printf("  ⚠ 相干雷达计算失败(数据不足)\n");
+        return -1;
+    }
+    printf("  ✅ 三路相干: %s 置信度=%.2f 提前=%dmin\n",
+           c.pattern_name, c.confidence, c.lead_time_min);
 
     /* 保存到DB */
     wt_db_save_correl(&c);
