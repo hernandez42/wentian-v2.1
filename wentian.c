@@ -194,17 +194,23 @@ int wentian_collect_all(void) {
     /* 主源: met.no (挪威气象局, 免费开源, 数据质量公认) → wttr.in(备2) → Open-Meteo(末备) */
     {
         double mn_t = NAN, mn_h = NAN, mn_p = NAN, mn_w = NAN;
+        double mn_wd = NAN, mn_cloud = NAN, mn_precip = NAN;  /* ⚠ 2026-09-12 新增 */
         char mn_s[64] = {0};
-        if (fetch_metno(&mn_t, &mn_h, &mn_p, &mn_w, mn_s, sizeof(mn_s)) == 0) {
+        if (fetch_metno_full(&mn_t, &mn_h, &mn_p, &mn_w, mn_s, sizeof(mn_s),
+                             &mn_wd, &mn_cloud, &mn_precip) == 0) {
             outdoor.fetched_at = time(NULL);
             if (!isnan(mn_t)) { outdoor.temperature = mn_t; }
             if (!isnan(mn_h)) { outdoor.humidity = mn_h; }
             if (!isnan(mn_p)) { outdoor.pressure_msl = mn_p; }
-            if (!isnan(mn_w)) { outdoor.wind_speed = mn_w; }
+            if (!isnan(mn_w)) { outdoor.wind_speed = mn_w * 3.6; }  /* met.no是m/s, DB/卡片口径km/h */
+            if (!isnan(mn_wd)) { outdoor.wind_dir = mn_wd; }
+            if (!isnan(mn_cloud)) { outdoor.cloud_cover = mn_cloud; }
+            if (!isnan(mn_precip)) { outdoor.precipitation = mn_precip; }
             strncpy(outdoor.weather_text, mn_s, sizeof(outdoor.weather_text)-1);
             om_ok = 1;
-            printf("  ✅ [主] met.no T=%.1f°C H=%.0f%% P=%.0fhPa 风=%.0fkm/h %s\n",
-                   mn_t, mn_h, mn_p, mn_w, mn_s);
+            printf("  ✅ [主] met.no T=%.1f°C H=%.0f%% P=%.0fhPa 风=%.0fkm/h %s"
+                   " 风向=%.0f° 云=%.0f%% 1h雨=%.1fmm\n",
+                   mn_t, mn_h, mn_p, mn_w, mn_s, mn_wd, mn_cloud, mn_precip);
         }
     }
     if (!om_ok) {

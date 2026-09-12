@@ -37,6 +37,12 @@ static void write_kv_num(FILE *f, const char *key, double val, int last) {
     if (isnan(val)) { /* NaN表示字段缺失, 跳过输出 */ return; }
     fprintf(f, "    \"%s\": %.4f%s\n", key, val, last ? "" : ",");
 }
+/* ⚠ 修复(2026-09-12): DB NULL经column_double()变0.0绕过isnan检查(lesson 31).
+ * 需要区分"缺值"的字段一律用本函数取值, NULL→NAN→不输出。 */
+static double col_num(sqlite3_stmt *st, int col) {
+    return sqlite3_column_type(st, col) == SQLITE_NULL
+           ? (double)NAN : sqlite3_column_double(st, col);
+}
 static void write_kv_int(FILE *f, const char *key, long val, int last) {
     fprintf(f, "    \"%s\": %ld%s\n", key, val, last ? "" : ",");
 }
@@ -180,11 +186,18 @@ static int export_one(sqlite3 *db, FILE *out) {
     sqlite3_finalize(st);
     fprintf(out, "    },\n");
     fprintf(out, "    \"swpc_f107\": {\n");
-    if (sqlite3_prepare_v2(db, "SELECT ts,flux_sfu,ninety_day_mean FROM swpc_f107 ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
+    /* ⚠ 修复(2026-09-12): swpc_f107常有多行同ts, 纯ts排序取到旧行(NULL均值)
+     * → 用rowid二级排序取真正最新行 */
+    if (sqlite3_prepare_v2(db, "SELECT ts,flux_sfu,ninety_day_mean FROM swpc_f107 ORDER BY ts DESC, rowid DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
         && sqlite3_step(st) == SQLITE_ROW) {
+        /* ⚠ 修复(2026-09-12): ninety_day_mean为NULL时write_kv_num跳过输出,
+         * 但flux_sfu已按last=0写了尾逗号 → JSON非法。先取值再定last。 */
+        double flux = sqlite3_column_double(st, 1);
+        double mean90 = col_num(st, 2);
+        int has90 = !isnan(mean90);
         write_kv_int(out, "ts", sqlite3_column_int64(st, 0), 0);
-        write_kv_num(out, "flux_sfu", sqlite3_column_double(st, 1), 0);
-        write_kv_num(out, "ninety_day_mean", sqlite3_column_double(st, 2), 1);
+        write_kv_num(out, "flux_sfu", flux, !has90);
+        if (has90) write_kv_num(out, "ninety_day_mean", mean90, 1);
     }
     sqlite3_finalize(st);
     fprintf(out, "    },\n");
@@ -278,9 +291,10 @@ static int export_one(sqlite3 *db, FILE *out) {
     sqlite3_finalize(st);
     fprintf(out, "    },\n");
 
-    /* 13. local_gnss */
+    /* 13. local_gnss — ⚠ 修复(2026-09-12): 只取定位有效的最新行(fix>0),
+     * 未定位零值行(fix=0)不进JSON, 杜绝"GPS=0颗"假值 (lesson 20a2) */
     fprintf(out, "    \"local_gnss\": {\n");
-    if (sqlite3_prepare_v2(db, "SELECT ts,lat,lon,alt,fix,gps_sats,bds_sats,pdop,hdop,vdop FROM local_gnss ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
+    if (sqlite3_prepare_v2(db, "SELECT ts,lat,lon,alt,fix,gps_sats,bds_sats,pdop,hdop,vdop FROM local_gnss WHERE fix > 0 AND lat != 0 ORDER BY ts DESC LIMIT 1", -1, &st, NULL) == SQLITE_OK
         && sqlite3_step(st) == SQLITE_ROW) {
         write_kv_int(out, "ts", sqlite3_column_int64(st, 0), 0);
         write_kv_num(out, "lat", sqlite3_column_double(st, 1), 0);

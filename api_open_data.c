@@ -118,7 +118,10 @@ static int fetch_noaa_kp_1m(double *out_kp, double *out_estimated, char *out_tim
 }
 
 /* ── 2. NOAA SWPC F10.7 太阳射电通量 ──────────────────────── */
-/* 格式: [{"time_tag":"...","frequency":2800,"flux":108.0,"..."}] */
+/* 格式: [{"time_tag":"...","frequency":2800,"flux":108.0,"..."}] (最新在前)
+ * ⚠ 修复(2026-09-12): API的 ninety_day_mean 字段恒为null(实测123条全null),
+ * 旧版找不到字段 → 卡片"90日均值=0.0"假值。改为用本响应自带的约90天
+ * flux历史逐条求均值(数据源仍是NOAA官方, 非编造)。 */
 static int fetch_noaa_f107(double *out_flux, double *out_mean90) {
     char *body = wt_http_get(NOAA_F107_URL, 15);
     if (!body) return -1;
@@ -129,12 +132,29 @@ static int fetch_noaa_f107(double *out_flux, double *out_mean90) {
     if (p) {
         flux = strtod(p + 7, NULL);
     }
-    /* 90天平均 */
+    /* 官方字段优先 */
     const char *q = strstr(body, "\"avg_flux\"");
     if (!q) q = strstr(body, "\"ninety_day_mean\"");
     if (q) {
         const char *colon = strchr(q, ':');
-        if (colon) mean90 = strtod(colon + 1, NULL);
+        if (colon && *(colon + 1) != 'n')  /* null不算 */
+            mean90 = strtod(colon + 1, NULL);
+    }
+    if (isnan(mean90)) {
+        /* 自算: 累计所有 "flux":数字 (排除 "avg_flux" 等带前缀的键) */
+        double sum = 0; int n = 0;
+        const char *s = body;
+        while (n < 200 && (s = strstr(s, "\"flux\"")) != NULL) {
+            if (s > body && *(s - 1) != '{' && *(s - 1) != ',') { s += 6; continue; }
+            const char *colon = strchr(s, ':');
+            if (colon) {
+                char *endp;
+                double v = strtod(colon + 1, &endp);
+                if (endp != colon + 1 && v > 50 && v < 400) { sum += v; n++; }
+            }
+            s += 6;
+        }
+        if (n >= 10) mean90 = sum / n;  /* 样本太少不假装是90日均值 */
     }
 
     if (out_flux) *out_flux = flux;
@@ -146,8 +166,40 @@ static int fetch_noaa_f107(double *out_flux, double *out_mean90) {
 
 /* ── 3. met.no Locationforecast (挪威气象局权威) ────────── */
 /* 非static: 供wentian.c 1+1主备调用 */
+/* ⚠ 修复(2026-09-12): 三个新出参 wind_dir/cloud/precip1h — met.no instant里
+ * 本来就有 wind_from_direction / cloud_area_fraction, next_1_hours有
+ * precipitation_amount, 旧版不解析导致 outdoor 表 wind_d/cloud/precip 恒0。
+ * summary 解析根因: compact格式里 next_1_hours 是
+ * "summary":{"symbol_code":"partly cloudy"} 嵌套对象, 旧版抓 "summary" 后
+ * 第一个引号取到的是键名 "symbol_code" 本身 → weather_text='symbol_code'。
+ * 现直接抓 "symbol_code" 的值并映射中文。 */
+static const char *metno_symbol_cn(const char *sym) {
+    /* met.no symbol_code → 中文 (官方码表) */
+    if (!sym || !*sym) return "";
+    if (strstr(sym, "thunder")) return "雷暴";
+    if (strstr(sym, "heavy") && strstr(sym, "rain")) return "大雨";
+    if (strstr(sym, "moderate") && strstr(sym, "rain")) return "中雨";
+    if (strstr(sym, "light") && strstr(sym, "rain")) return "小雨";
+    if (strstr(sym, "rain")) return "雨";
+    if (strstr(sym, "sleet")) return "雨夹雪";
+    if (strstr(sym, "snow")) return "雪";
+    if (strstr(sym, "fog")) return "雾";
+    if (strstr(sym, "clearsky")) return "晴";
+    if (strstr(sym, "fair")) return "晴间少云";
+    if (strstr(sym, "partly")) return "多云";
+    if (strstr(sym, "cloudy")) return "阴";
+    return sym;  /* 未知码原样输出, 不编造 */
+}
+
 int fetch_metno(double *out_temp, double *out_humid, double *out_pressure,
                        double *out_wind, char *out_summary, int max_summary) {
+    return fetch_metno_full(out_temp, out_humid, out_pressure, out_wind,
+                            out_summary, max_summary, NULL, NULL, NULL);
+}
+
+int fetch_metno_full(double *out_temp, double *out_humid, double *out_pressure,
+                       double *out_wind, char *out_summary, int max_summary,
+                       double *out_wind_dir, double *out_cloud, double *out_precip1h) {
     char *body = wt_http_get(METNO_FORECAST_URL, 15);
     if (!body) return -1;
 
@@ -158,22 +210,32 @@ int fetch_metno(double *out_temp, double *out_humid, double *out_pressure,
         if (out_humid)    *out_humid    = json_find_double(details, "relative_humidity");
         if (out_pressure)  *out_pressure  = json_find_double(details, "air_pressure_at_sea_level");
         if (out_wind)      *out_wind     = json_find_double(details, "wind_speed");
+        if (out_wind_dir)  *out_wind_dir = json_find_double(details, "wind_from_direction");
+        if (out_cloud)     *out_cloud    = json_find_double(details, "cloud_area_fraction");
     }
-    /* summary 在 next_1_hours/details 或 next_6_hours  */
-    const char *next1 = strstr(body, "\"next_1_hours\":");
-    if (next1 && out_summary) {
-        const char *sum = strstr(next1, "\"summary\"");
-        if (sum) {
-            const char *colon = strchr(sum, ':');
-            if (colon) {
-                const char *q1 = strchr(colon, '"');
+    /* symbol_code: next_1_hours优先, 无则 next_6_hours
+     * (compact格式: "next_1_hours":{"details":{...},"summary":{"symbol_code":"..."}} */
+    if (out_summary) {
+        const char *blk = strstr(body, "\"next_1_hours\":");
+        if (!blk) blk = strstr(body, "\"next_6_hours\":");
+        if (blk) {
+            const char *sc = strstr(blk, "\"symbol_code\"");
+            if (sc) {
+                const char *colon = strchr(sc, ':');
+                const char *q1 = colon ? strchr(colon, '"') : NULL;
                 if (q1) {
                     const char *q2 = strchr(q1 + 1, '"');
-                    if (q2 && (q2 - q1 - 1) < max_summary - 1) {
-                        strncpy(out_summary, q1 + 1, q2 - q1 - 1);
+                    if (q2 && (q2 - q1 - 1) < 64) {
+                        char sym[64];
+                        size_t n = (size_t)(q2 - q1 - 1);
+                        memcpy(sym, q1 + 1, n); sym[n] = '\0';
+                        const char *cn = metno_symbol_cn(sym);
+                        strncpy(out_summary, cn, max_summary - 1);
                     }
                 }
             }
+            /* next_1_hours 里的降水毫米数 */
+            if (out_precip1h) *out_precip1h = json_find_double(blk, "precipitation_amount");
         }
     }
 

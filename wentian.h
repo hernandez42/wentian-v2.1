@@ -503,6 +503,10 @@ int wt_multisrc_run(void);            /* 5源加权 S4 融合 (SDR+UART+OpenMete
 int wt_open_data_run(void);            /* NOAA SWPC + met.no + wttr.in + USGS */
 int fetch_metno(double *out_temp, double *out_humid, double *out_pressure,
                 double *out_wind, char *out_summary, int max_summary);
+/* ⚠ 新增(2026-09-12): 全字段版 — 多返回 风向deg/云量%/未来1h降水mm */
+int fetch_metno_full(double *out_temp, double *out_humid, double *out_pressure,
+                double *out_wind, char *out_summary, int max_summary,
+                double *out_wind_dir, double *out_cloud, double *out_precip1h);
 int fetch_wttr(double *out_temp, double *out_humid, char *out_desc, int max_desc);
 
 /* ── 全系统自愈修复 (wt_self_repair.c) ────────────────────── */

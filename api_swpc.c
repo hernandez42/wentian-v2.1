@@ -127,6 +127,23 @@ int wt_swpc_f107(wt_f107_t *out) {
     out->flux_sfu = wt_json_num_nan(snip, "flux");
     out->frequency_mhz = 2800;
     out->ninety_day_mean = wt_json_num_nan(snip, "ninety_day_mean");
+    /* ⚠ 修复(2026-09-12): API该字段恒null → DB存NULL → 推送假0。
+     * 用本响应自带的~90天flux序列自算均值(源仍NOAA官方)。 */
+    if (isnan(out->ninety_day_mean)) {
+        double sum = 0; int n = 0;
+        const char *s = json;
+        while (n < 200 && (s = strstr(s, "\"flux\"")) != NULL) {
+            if (s > json && *(s - 1) != '{' && *(s - 1) != ',') { s += 6; continue; }
+            const char *colon = strchr(s, ':');
+            if (colon) {
+                char *endp;
+                double v = strtod(colon + 1, &endp);
+                if (endp != colon + 1 && v > 50 && v < 400) { sum += v; n++; }
+            }
+            s += 6;
+        }
+        if (n >= 10) out->ninety_day_mean = sum / n;
+    }
     free(snip);
     free(json);
     return 0;
