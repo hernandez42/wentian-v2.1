@@ -374,6 +374,26 @@ static int do_self_repair(char *log_out, int max_log,
 
             level_repaired = 0;
 
+            /* 过境新闻服务不存在时跳过修复 */
+            if (e->service && strcmp(e->service, "passage-news") == 0) {
+                char _cbuf[64] = {0};
+                FILE *_cp = popen("systemctl is-active passage-news 2>/dev/null", "r");
+                if (_cp) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-result"
+                    fread(_cbuf, 1, sizeof(_cbuf)-1, _cp);
+#pragma GCC diagnostic pop
+                    pclose(_cp);
+                }
+                char *_nl = strchr(_cbuf, '\n');
+                if (_nl) *_nl = '\0';
+                if (strcmp(_cbuf, "active") != 0) {
+                    printf("  ⚠️ 过境新闻服务不存在, 跳过修复\n");
+                    write_repair_log_file(e, "过境新闻服务不存在, 跳过修复");
+                    continue;
+                }
+            }
+
             if (e->service && e->service[0]) {
                 if (restart_systemd(e->service, e->desc)) {
                     level_repaired = 1;

@@ -273,16 +273,24 @@ int wentian_collect_all(void) {
     /* 多源METAR: 先试美国官方API, 不行则用 Open-Meteo/ECMWF */
     if (wt_aviation_metar("ZPPP", &metar) == 0 && metar.obs_time > time(NULL) - 10800) {
         /* 美国官方API有数据且新鲜(<3h), 用官方 */
-        printf("  ✅ T=%.0f°C 风%d°/%dkt 气压=%.0fhPa (源:aviationweather.gov)\n",
-            metar.temp, metar.wind_dir, metar.wind_speed_kt, metar.altim_hpa);
+        char wd_str[16], ws_str[16];
+        snprintf(wd_str, sizeof(wd_str), "%d", metar.wind_dir);
+        snprintf(ws_str, sizeof(ws_str), "%d", metar.wind_speed_kt);
+        printf("  ✅ T=%.0f°C 风%s°/%skt 气压=%.0fhPa (源:aviationweather.gov)\n",
+            metar.temp, metar.wind_dir < 0 ? "-" : wd_str,
+            metar.wind_speed_kt < 0 ? "-" : ws_str, metar.altim_hpa);
         printf("     RAW: %s\n", metar.raw);
         wt_db_save_metar(&metar);
         metar_ok = 1;
         ok++;
     } else if (wt_metar_fallback_run(&metar) == 0 && metar.obs_time > time(NULL) - 10800) {
         /* Open-Meteo ECMWF 降级 */
-        printf("  ✅ T=%.0f°C 风%d°/%dkt 气压=%.0fhPa (源:ECMWF/Open-Meteo)\n",
-            metar.temp, metar.wind_dir, metar.wind_speed_kt, metar.altim_hpa);
+        char wd_str[16], ws_str[16];
+        snprintf(wd_str, sizeof(wd_str), "%d", metar.wind_dir);
+        snprintf(ws_str, sizeof(ws_str), "%d", metar.wind_speed_kt);
+        printf("  ✅ T=%.0f°C 风%s°/%skt 气压=%.0fhPa (源:ECMWF/Open-Meteo)\n",
+            metar.temp, metar.wind_dir < 0 ? "-" : wd_str,
+            metar.wind_speed_kt < 0 ? "-" : ws_str, metar.altim_hpa);
         printf("     RAW: %s\n", metar.raw);
         wt_db_save_metar(&metar);
         metar_ok = 1;
@@ -301,8 +309,13 @@ int wentian_collect_all(void) {
     for (int i = 0; i < 5; i++) {
         wt_metar_t alt = {0};
         if (wt_aviation_metar(alt_icaos[i], &alt) == 0 && alt.obs_time > time(NULL) - 10800) {
-            printf("  ✅ %s(%s) T=%.0f°C 风%d°/%dkt 气压=%.0fhPa\n",
-                alt.icao, alt_names[i], alt.temp, alt.wind_dir, alt.wind_speed_kt, alt.altim_hpa);
+            char wd_str[16], ws_str[16];
+            snprintf(wd_str, sizeof(wd_str), "%d", alt.wind_dir);
+            snprintf(ws_str, sizeof(ws_str), "%d", alt.wind_speed_kt);
+            printf("  ✅ %s(%s) T=%.0f°C 风%s°/%skt 气压=%.0fhPa\n",
+                alt.icao, alt_names[i], alt.temp,
+                alt.wind_dir < 0 ? "-" : wd_str,
+                alt.wind_speed_kt < 0 ? "-" : ws_str, alt.altim_hpa);
             wt_db_save_metar(&alt);
         } else {
             printf("  ⚠️ %s(%s) 无实时METAR\n", alt_icaos[i], alt_names[i]);
@@ -368,7 +381,12 @@ int wentian_collect_all(void) {
     } else fail++;
     wt_f107_t f107 = {0};
     if (wt_swpc_f107(&f107) == 0) {
-        printf("  ✅ F10.7=%.1f sfu 90日均值=%.1f\n", f107.flux_sfu, f107.ninety_day_mean);
+        char _mean90[32];
+        if (isnan(f107.ninety_day_mean))
+            snprintf(_mean90, sizeof(_mean90), "暂缺");
+        else
+            snprintf(_mean90, sizeof(_mean90), "%.1f", f107.ninety_day_mean);
+        printf("  ✅ F10.7=%.1f sfu 90日均值=%s\n", f107.flux_sfu, _mean90);
         wt_db_save_f107(&f107);
         ok++;
     } else fail++;

@@ -403,7 +403,10 @@ int wt_local_db_init(const char *path) {
     };
     for (int i = 0; sqls[i]; i++) {
         if (sqlite3_exec(db, sqls[i], NULL, NULL, &err) != SQLITE_OK) {
-            fprintf(stderr, "[local_db] SQL: %s\n", err);
+            if (strstr(err, "UNIQUE"))
+                fprintf(stderr, "[local_db] 提示: local_sdr存在重复行, 唯一索引自动跳过\n");
+            else
+                fprintf(stderr, "[local_db] SQL: %s\n", err);
             sqlite3_free(err);
             /* 索引创建失败不致命, 继续执行后续DDL */
         }
