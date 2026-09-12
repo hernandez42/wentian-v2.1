@@ -102,6 +102,7 @@ int wt_db_init(const char *path) {
         fprintf(stderr, "[ERR] DB_SAVE(%s) 打开数据库失败\n", #name); \
         return -1; \
     } \
+    sqlite3_busy_timeout(db, 1000); /* ⚠ 修复(2026-09-11): 防并发写冲突database is locked */ \
     sqlite3_stmt *st; \
     if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK) { \
         fprintf(stderr, "[ERR] DB_SAVE(%s) prepare失败: %s\n", #name, sqlite3_errmsg(db)); \

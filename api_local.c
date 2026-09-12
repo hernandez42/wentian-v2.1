@@ -416,6 +416,7 @@ int wt_local_db_init(const char *path) {
 int wt_local_save_uno(const wt_uno_t *u) {
     sqlite3 *db; sqlite3_stmt *st;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_busy_timeout(db, 1000); /* ⚠ 修复(2026-09-11): 防并发写冲突 */
     if (sqlite3_prepare_v2(db,
         "INSERT INTO local_uno VALUES (?,?,?,?,?,?,?)", -1, &st, NULL) == SQLITE_OK) {
         sqlite3_bind_int64(st, 1, u->ts);
@@ -434,6 +435,7 @@ int wt_local_save_uno(const wt_uno_t *u) {
 int wt_local_save_gnss(const wt_gnss_t *g) {
     sqlite3 *db; sqlite3_stmt *st;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_busy_timeout(db, 1000); /* ⚠ 修复(2026-09-11): 防并发写冲突 */
     if (sqlite3_prepare_v2(db,
         "INSERT INTO local_gnss (ts,lat,lon,alt,fix,total_sats,gps_sats,bds_sats,"
         "glonass_sats,pdop,hdop,vdop,altitude_msl,speed_kts,heading_deg,gps_snr,bds_snr) "
@@ -467,6 +469,7 @@ int wt_local_save_gnss(const wt_gnss_t *g) {
 int wt_local_save_iono(const wt_iono_t *i) {
     sqlite3 *db; sqlite3_stmt *st;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_busy_timeout(db, 1000); /* ⚠ 修复(2026-09-11): 防并发写冲突 */
     if (sqlite3_prepare_v2(db,
         "INSERT INTO local_iono VALUES (?,?,?,?,?,?,?,?,?)", -1, &st, NULL) == SQLITE_OK) {
         sqlite3_bind_int64(st, 1, i->ts);
@@ -487,6 +490,7 @@ int wt_local_save_iono(const wt_iono_t *i) {
 int wt_local_save_sdr(const wt_sdr_t *s) {
     sqlite3 *db; sqlite3_stmt *st;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_busy_timeout(db, 1000); /* ⚠ 修复(2026-09-11): 防并发写冲突 */
     /* v2.1(2026-09-12): INSERT→INSERT OR IGNORE, 依赖唯一索引
      * idx_local_sdr_tsfile(ts,file)防同一扫频文件每周期重复入库 */
     if (sqlite3_prepare_v2(db,

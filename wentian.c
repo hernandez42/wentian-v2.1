@@ -487,7 +487,7 @@ int wentian_collect_all(void) {
         ok++;
     } else {
         /* 三级缓存: 读local_gnss表上一条有效数据 */
-        printf("  ⚠ GPS/北斗离线, 使用缓存数据...\n");
+        printf("  ⚠ GPS采集进行中(可能串口被占用), 使用缓存数据...\n");
         int gnss_cached = 0;  /* ⚠ 修复(2026-09-11): 旧代码 if(!ok) fail++ 用全局
                                 * 成功计数器当条件(恒>0), GNSS全链失败永不计入 */
         sqlite3 *db_c;

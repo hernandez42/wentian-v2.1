@@ -100,19 +100,31 @@ time_t parse_iso(const char *s) {
     return mktime(&tm);
 }
 
-/* ── AviationWeather METAR (机场实测) ───────────────────── */
+/* ── AviationWeather METAR (机场实测, wttr.in回退) ───── */
+/* ⚠ 修复(2026-09-11): ZPMS/ZPLJ/ZPJH在aviationweather.gov无数据时,
+ * 自动回退到wttr.in天气数据填充METAR字段 */
+static const char *icao_to_wttr_city(const char *icao) {
+    if (strcmp(icao, "ZPMS") == 0) return "Mangshi";
+    if (strcmp(icao, "ZPLJ") == 0) return "Lijiang";
+    if (strcmp(icao, "ZPJH") == 0) return "Jinghong";
+    if (strcmp(icao, "ZPPP") == 0) return "Kunming";
+    if (strcmp(icao, "ZUGY") == 0) return "Guiyang";
+    if (strcmp(icao, "ZUUU") == 0) return "Chengdu";
+    return NULL;
+}
+
 int wt_aviation_metar(const char *icao, wt_metar_t *out) {
     memset(out, 0, sizeof(*out));
     char url[512];
     snprintf(url, sizeof(url),
         "https://aviationweather.gov/api/data/metar?ids=%s&format=json&hours=1", icao);
     char *json = wt_http_get(url, 10);
-    if (!json) return -1;
+    if (!json) goto fallback_wttr;
 
     char icao_pat[32];
     snprintf(icao_pat, sizeof(icao_pat), "\"icaoId\":\"%s\"", icao);
     const char *block = strstr(json, icao_pat);
-    if (!block) { free(json); return -1; }
+    if (!block) { free(json); goto fallback_wttr; }
 
     /* 向前找最近的 { */
     const char *p = block;
@@ -150,6 +162,29 @@ int wt_aviation_metar(const char *icao, wt_metar_t *out) {
     free(obj);
     free(json);
     return 0;
+
+fallback_wttr:
+    /* ⚠ 修复(2026-09-11): aviationweather.gov无数据, 用wttr.in填充 */
+    {
+        const char *city = icao_to_wttr_city(icao);
+        if (!city) return -1;
+        wt_outdoor_t wtr = {0};
+        if (wt_wttr_in(city, &wtr) != 0) return -1;
+        out->obs_time = time(NULL);
+        strncpy(out->icao, icao, sizeof(out->icao)-1);
+        out->temp = wtr.temperature;
+        out->dewpoint = NAN;
+        out->wind_dir = -1;
+        out->wind_speed_kt = (int)(wtr.wind_speed / 1.852 + 0.5); /* km/h → kt */
+        out->visibility_m = (int)wtr.visibility;
+        if (out->visibility_m <= 0) out->visibility_m = 10000;
+        out->altim_hpa = wtr.pressure_msl;
+        if (wtr.weather_text[0])
+            snprintf(out->raw, sizeof(out->raw), "SYNTHETIC(wttr.in): %s", wtr.weather_text);
+        else
+            snprintf(out->raw, sizeof(out->raw), "SYNTHETIC(wttr.in): no text");
+        return 0;
+    }
 }
 
 /* ── NASA APOD (每日天文图) - 含缓存降级 ────────────────── */

@@ -9,6 +9,8 @@
 #include <sqlite3.h>
 #include <math.h>
 #include <string.h>
+#include <netdb.h>       /* ⚠ 修复(2026-09-11): DNS预检用 */
+#include <sys/socket.h>  /* getaddrinfo需要AF_UNSPEC/SOCK_STREAM */
 
 #define AVIATION_REPORT "/root/data/fusion/aviation_report.txt"
 
@@ -806,6 +808,24 @@ char *wt_notam_fetch(void) {
     char *result = NULL;
 
     for (int i = 0; sources[i] != NULL; i++) {
+        /* ⚠ 修复(2026-09-11): DNS预检 — ICAO/FAA域名被墙getaddrinfo立即失败,
+         * 跳过重试(原4次DNS重试浪费10s)直接回退国内提示 */
+        char host[256];
+        const char *h = strstr(sources[i], "://");
+        if (h) {
+            h += 3;
+            int hi = 0;
+            while (*h && *h != '/' && *h != ':' && hi < 255) host[hi++] = *h++;
+            host[hi] = '\0';
+            struct addrinfo hints, *res;
+            memset(&hints, 0, sizeof(hints));
+            hints.ai_family = AF_UNSPEC;
+            hints.ai_socktype = SOCK_STREAM;
+            if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+                continue;  /* DNS解析失败, 跳过此源 */
+            }
+            freeaddrinfo(res);
+        }
         char *resp = wt_http_get(sources[i], 15);
         if (resp) {
             /* 检查返回内容是否有效: 非空且不含错误提示 */
@@ -857,8 +877,8 @@ char *wt_notam_fetch(void) {
         /* 当前源失败, 继续尝试下一个 */
     }
 
-    /* 所有源均不可用 → 诚实回退 */
-    result = strdup("\n── NOTAM公告 ──\n   NOTAM暂不可用 (API需授权, 国内源建设中)\n");
+    /* 所有源均不可用(DNS被墙) → 诚实回退 */
+    result = strdup("\n── NOTAM公告 ──\n   NOTAM暂不可用(国内网络限制, 建议通过CAAC官网查询)\n");
     return result;
 }
 

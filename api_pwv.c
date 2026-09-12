@@ -41,7 +41,25 @@
 #define PWV_MAGNUS_A       6.105
 #define PWV_MAGNUS_B       17.27
 #define PWV_MAGNUS_C       237.7
-#define PWV_PRESSURE_GRAD  0.12   /* hPa/m, 气压垂直递减率 */
+#define PWV_PRESSURE_GRAD  0.12   /* hPa/m, 气压垂直递减率(旧线性近似, 被指数公式替代) */
+#define PWV_SCALE_HEIGHT   8430.0 /* 气压标高(m): ICAO标准大气, 用于指数气压公式 */
+#define PWV_P_STATION_MIN  600.0  /* 测站压合理下限(昆明2103m≈790hPa, 宽松到600) */
+#define PWV_MSL_STD        1013.25/* 标准海平面气压(hPa) */
+
+/* 气压类型检测: 输入<800hPa视为测站压(昆明2103m≈790hPa)
+ * → 自动转为海平面压(指数公式 p_msl = p_station / exp(-h/8430))
+ * ≥800hPa视为海平面压不变 */
+static double pressure_to_msl(double p, double alt_m) {
+    if (p < 800.0) {
+        return p / exp(-alt_m / PWV_SCALE_HEIGHT);
+    }
+    return p;
+}
+
+/* 海平面压→测站压(指数气压公式, 比线性0.12hPa/m准确~28hPa@2103m) */
+static double msl_to_station(double p_msl, double alt_m) {
+    return p_msl * exp(-alt_m / PWV_SCALE_HEIGHT);
+}
 
 /* ── PWV反演结果 ────────────────────────────────────────── */
 /* wt_pwv_t 已在 wentian.h 中定义 */
@@ -203,11 +221,38 @@ int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
     /* 2. 取GNSS坐标 */
     load_gnss_pos(&lat, &lon, &alt);
 
-    /* 3. 海平面气压 → 测站气压(用GPS海拔) */
-    double p_station = p_sea - (alt * PWV_PRESSURE_GRAD);
-    /* 站压合理范围(~800hPa@2103m): 700-1050 兜底 */
-    if (p_station < 700 || p_station > 1050) p_station = p_sea - 252;
-    out->press_hpa = p_station;
+    /* 3. 气压处理: 检测输入是海平面压还是测站压
+     *    海平面压≈1013hPa, 测站压在昆明2103m≈790hPa */
+    double p_msl = pressure_to_msl(p_sea, alt);
+    /* ⚠ 修复(2026-09-11): p_msl<800表示输入是测站压但转换失败,
+     * 从kf_pressure表读Kalman融合气压(≈1020hPa)替代 */
+    if (p_msl < 800 || p_msl > 1100) {
+        sqlite3 *db_kf;
+        double fused_p = PWV_MSL_STD;
+        if (sqlite3_open(WENTIAN_DB, &db_kf) == SQLITE_OK) {
+            sqlite3_stmt *st_kf;
+            if (sqlite3_prepare_v2(db_kf,
+                "SELECT fused FROM kf_pressure ORDER BY ts DESC LIMIT 1",
+                -1, &st_kf, NULL) == SQLITE_OK) {
+                if (sqlite3_step(st_kf) == SQLITE_ROW) {
+                    double v = sqlite3_column_double(st_kf, 0);
+                    if (v > 900 && v < 1100) fused_p = v;
+                }
+                sqlite3_finalize(st_kf);
+            }
+            sqlite3_close(db_kf);
+        }
+        printf("  ⚠ PWV海平面气压异常(%.0fhPa), 改用Kalman融合值(%.0fhPa)\n", p_msl, fused_p);
+        p_msl = fused_p;
+    }
+    /* 测站气压(指数公式, 比旧线性近似0.12hPa/m准确~28hPa) */
+    double p_station = msl_to_station(p_msl, alt);
+    /* 站压合理范围(昆明2103m≈790hPa): 低于600或>1050则用标准大气兜底 */
+    if (p_station < PWV_P_STATION_MIN || p_station > 1050) {
+        p_station = msl_to_station(PWV_MSL_STD, alt);
+        p_msl = PWV_MSL_STD;
+    }
+    out->press_hpa = p_msl;  /* ⚠ 修复(2026-09-11): 存海平面压而非站压770hPa */
 
     /* 4. Saastamoinen模型(天顶角60°=典型值) */
     saastamoinen(p_station, T_c, rh, 60.0, &out->ztd_m, &out->zhd_m, &out->zwd_m);
@@ -217,7 +262,7 @@ int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
     out->delta_pwv = out->pwv_mm - last_pwv;
 
     /* 6. 暴风雨指标 */
-    out->storm_score = storm_score(out->pwv_mm, out->delta_pwv, rh, p_sea);
+    out->storm_score = storm_score(out->pwv_mm, out->delta_pwv, rh, p_msl);
 
     return 0;
 }
@@ -226,6 +271,7 @@ int wt_pwv_compute(wt_pwv_t *out, double last_pwv) {
 int wt_db_save_pwv(const wt_pwv_t *p) {
     sqlite3 *db;
     if (sqlite3_open(WENTIAN_DB, &db) != SQLITE_OK) return -1;
+    sqlite3_busy_timeout(db, 1000); /* ⚠ 修复(2026-09-11): 防并发写冲突 */
 
     char sql[512];
     snprintf(sql, sizeof(sql),
@@ -251,8 +297,8 @@ static int pwv_csv_append(const wt_pwv_t *p) {
         fprintf(f, "ts,T_c,rh,p_sea,p_station,ztd_m,zhd_m,zwd_m,pwv_mm,pwv_delta,storm_score\n");
     }
 
-    /* 海平面气压(近似) */
-    double p_sea = p->press_hpa + (WENTIAN_ALT * PWV_PRESSURE_GRAD);
+    /* 海平面气压(指数公式: p_msl = p_station / exp(-h/8430)) */
+    double p_sea = p->press_hpa / exp(-WENTIAN_ALT / PWV_SCALE_HEIGHT);
     /* 用unix时间戳(整数), 这样load_pwv_recent能自动识别为新格式 */
     fprintf(f, "%ld,%.2f,%.1f,%.1f,%.2f,%.6f,%.6f,%.6f,%.4f,%.2f,%d\n",
         (long)p->ts, p->temp_c, p->humid_pct, p_sea, p->press_hpa,
