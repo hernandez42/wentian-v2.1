@@ -17,18 +17,21 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p tle
-          for g in beidou gps galileo glonass; do
-            echo "::group::fetch $g"
-            url="https://celestrak.org/NORAD/elements/gp.php?GROUP=${g}&FORMAT=tle"
-            if ! curl -fsSL --max-time 90 --retry 3 --retry-delay 5 -A "wentian-agx-tle/1.0" "$url" -o "tle/${g}.new"; then
-              echo "  FETCH_FAIL $g"; rm -f "tle/${g}.new"; continue
+          # Celestrak 的 GROUP 名与直觉不同: GPS 是 gps-ops(非 gps),
+          # GLONASS 是 glonass, 组合星座是 gnss。
+          for pair in "beidou:beidou" "gps:gps-ops" "galileo:galileo" "glonass:glonass"; do
+            name="${pair%%:*}"; grp="${pair##*:}"
+            echo "::group::$name via GROUP=$grp"
+            url="https://celestrak.org/NORAD/elements/gp.php?GROUP=${grp}&FORMAT=tle"
+            if ! curl -fsSL --max-time 90 --retry 3 --retry-delay 5 -A "wentian-agx-tle/1.0" "$url" -o "tle/${name}.new"; then
+              echo "  FETCH_FAIL $name"; rm -f "tle/${name}.new"; continue
             fi
-            n1=$(grep -c '^1 ' "tle/${g}.new" || echo 0)
-            n2=$(grep -c '^2 ' "tle/${g}.new" || echo 0)
+            n1=$(grep -c '^1 ' "tle/${name}.new" || echo 0)
+            n2=$(grep -c '^2 ' "tle/${name}.new" || echo 0)
             if [ "$n1" -gt 0 ] && [ "$n1" -eq "$n2" ]; then
-              mv "tle/${g}.new" "tle/${g}.tle"; echo "  OK $g: $n1 sats"
+              mv "tle/${name}.new" "tle/${name}.tle"; echo "  OK $name: $n1 sats"
             else
-              echo "  INVALID $g (l1=$n1 l2=$n2), keep existing"; rm -f "tle/${g}.new"
+              echo "  INVALID $name (l1=$n1 l2=$n2), keep existing"; rm -f "tle/${name}.new"
             fi
             sleep 6
           done
@@ -36,11 +39,9 @@ jobs:
       - name: Commit
         run: |
           git config user.name  "wentian-tle-bot"
-          git config user.email "tle-bot@users.noreply.github.com"
+          git config user.email  "tle-bot@users.noreply.github.com"
           git add -A tle/
-          if git diff --staged --quiet; then
-            echo "no change"
-          else
+          if git diff --staged --quiet; then echo "no change"; else
             git commit -m "chore(tle): refresh from Celestrak $(date -u +%FT%TZ)"
             git push; echo committed
           fi
