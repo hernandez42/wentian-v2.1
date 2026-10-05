@@ -1,4 +1,12 @@
 name: fetch-tle
+#每日代取 Celestrak GP 数据 -> 提交仓库。
+#
+# 为什么: 问天 AGX 本机到 celestrak.org / raw.githubusercontent 的
+#   443 出站被封, DNS 亦被污染; 但 api.github.com 可达。
+#   Actions runner 出口不受本机网络限制。
+#
+# 限流: Celestrak 每 2 小时最多刷新一次, 每日总请求 <50。
+#   本workflow 每日 4 次 x 7 组 = 28 次/日, 在限额内。
 on:
   schedule:
     - cron: '17 3,9,15,21 * * *'
@@ -13,33 +21,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch TLE from Celestrak
+      - name: Fetch GP data from Celestrak
         run: |
           set -uo pipefail
           mkdir -p tle
-          # Celestrak 的 GROUP 名与直觉不同: GPS 是 gps-ops(非 gps),
-          # GLONASS 是 glonass, 组合星座是 gnss。
-          for pair in "beidou:beidou" "gps:gps-ops" "galileo:galileo" "glonass:glonass"; do
+          # Celestrak 的 GROUP 名与直觉不同, 已实测确认:
+          #   GPS     -> gps-ops   (不是 gps)
+          #   GLONASS -> glo-ops   (不是 glonass)
+          for pair in "beidou:beidou" "gps:gps-ops" "galileo:galileo" \
+                      "glonass:glo-ops" "irnss:irnss" "geo:geo" "sbas:sbas"; do
             name="${pair%%:*}"; grp="${pair##*:}"
-            echo "::group::$name via GROUP=$grp"
             url="https://celestrak.org/NORAD/elements/gp.php?GROUP=${grp}&FORMAT=tle"
-            if ! curl -fsSL --max-time 90 --retry 3 --retry-delay 5 -A "wentian-agx-tle/1.0" "$url" -o "tle/${name}.new"; then
-              echo "  FETCH_FAIL $name"; rm -f "tle/${name}.new"; continue
+            if ! curl -fsSL --max-time 90 --retry 3 --retry-delay 5 \
+                 -A "wentian-agx-tle/1.0" "$url" -o "tle/${name}.new"; then
+              echo "FETCH_FAIL $name"; rm -f "tle/${name}.new"; continue
             fi
             n1=$(grep -c '^1 ' "tle/${name}.new" || echo 0)
             n2=$(grep -c '^2 ' "tle/${name}.new" || echo 0)
             if [ "$n1" -gt 0 ] && [ "$n1" -eq "$n2" ]; then
-              mv "tle/${name}.new" "tle/${name}.tle"; echo "  OK $name: $n1 sats"
+              mv "tle/${name}.new" "tle/${name}.tle"
+              echo "OK $name: $n1 sats"
             else
-              echo "  INVALID $name (l1=$n1 l2=$n2), keep existing"; rm -f "tle/${name}.new"
+              echo "INVALID $name (l1=$n1 l2=$n2), keep existing"
+              rm -f "tle/${name}.new"
             fi
             sleep 6
           done
-          echo "::endgroup::"
       - name: Commit
         run: |
           git config user.name  "wentian-tle-bot"
-          git config user.email  "tle-bot@users.noreply.github.com"
+          git config user.email "tle-bot@users.noreply.github.com"
           git add -A tle/
           if git diff --staged --quiet; then echo "no change"; else
             git commit -m "chore(tle): refresh from Celestrak $(date -u +%FT%TZ)"
