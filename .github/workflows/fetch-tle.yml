@@ -1,52 +1,46 @@
 name: fetch-tle
-#每日代取 Celestrak TLE → 提交到仓库
-# 原因: 问天AGX 本机到 celestrak.org / workers.dev 的 443 出站被封,
-#       DNS 亦被污染。GitHub Actions 出口不受影响。
 on:
   schedule:
-    - cron: '17 3,9,15,21 * * *'   # 每日4 次, 间隔 6h (Celestrak 限流: 每 2h 最多 1 次)
+    - cron: '17 3,9,15,21 * * *'
   workflow_dispatch:
-
 permissions:
   contents: write
-
+concurrency:
+  group: fetch-tle
+  cancel-in-progress: false
 jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Fetch TLE from Celestrak
-        env:
-          GROUP: beidou
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p tle
-          for g in beidou gps galileo; do
-            echo "fetching $g ..."
-            curl -fsSL --max-time 60 --retry 2 --retry-delay 3 \
-              "https://celestrak.org/NORAD/elements/gp.php?GROUP=$g&FORMAT=tle" \
-              -o "tle/$g.tle" || { echo "  FAIL $g"; continue; }
-            # 校验 3LE: 1 行与 2 行数必须相等且非零
-            n1=$(grep -c '^1 ' "tle/$g.tle" || true)
-            n2=$(grep -c '^2 ' "tle/$g.tle" || true)
-            if [ "$n1" -eq 0 ] || [ "$n1" != "$n2" ]; then
-              echo "  INVALID $g (1行=$n1 2行=$n2), 保留旧文件"
-              git checkout -- "tle/$g.tle" 2>/dev/null || rm -f "tle/$g.tle"
-            else
-              echo "  OK $g: $n1 satellites"
+          for g in beidou gps galileo glonass; do
+            echo "::group::fetch $g"
+            url="https://celestrak.org/NORAD/elements/gp.php?GROUP=${g}&FORMAT=tle"
+            if ! curl -fsSL --max-time 90 --retry 3 --retry-delay 5 -A "wentian-agx-tle/1.0" "$url" -o "tle/${g}.new"; then
+              echo "  FETCH_FAIL $g"; rm -f "tle/${g}.new"; continue
             fi
-            sleep 5
+            n1=$(grep -c '^1 ' "tle/${g}.new" || echo 0)
+            n2=$(grep -c '^2 ' "tle/${g}.new" || echo 0)
+            if [ "$n1" -gt 0 ] && [ "$n1" -eq "$n2" ]; then
+              mv "tle/${g}.new" "tle/${g}.tle"; echo "  OK $g: $n1 sats"
+            else
+              echo "  INVALID $g (l1=$n1 l2=$n2), keep existing"; rm -f "tle/${g}.new"
+            fi
+            sleep 6
           done
-
-      - name: Commit if changed
+          echo "::endgroup::"
+      - name: Commit
         run: |
           git config user.name  "wentian-tle-bot"
           git config user.email "tle-bot@users.noreply.github.com"
-          git add tle/
+          git add -A tle/
           if git diff --staged --quiet; then
             echo "no change"
           else
-            git commit -m "chore(tle): daily refresh from Celestrak $(date -u +%FT%TZ)"
-            git push
+            git commit -m "chore(tle): refresh from Celestrak $(date -u +%FT%TZ)"
+            git push; echo committed
           fi
